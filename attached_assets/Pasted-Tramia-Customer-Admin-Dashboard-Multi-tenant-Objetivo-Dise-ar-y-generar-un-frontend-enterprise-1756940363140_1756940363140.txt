@@ -1,0 +1,210 @@
+Tramia — Customer/Admin Dashboard (Multi-tenant)
+Objetivo. Diseñar y generar un frontend enterprise-grade que conecte con el backend actual (n8n + Postgres + Chatwoot + HeyReach) para:
+Onboarding & Integrations (Chatwoot/HeyReach/n8n/IdP).
+Agents & Prompts (editar/ versionar/ testear por agente).
+Knowledge Hub (subir/etiquetar/indexar fuentes para los agentes).
+Jobs & Orchestration (colas, estados, reintentos, gating AI-on/off).
+Reports (funnel, performance de agentes, costos/tokens, ops/errores).
+Settings (SSO, roles, follow-ups, feature flags, webhooks, billing).
+El canal de conversaciones seguirá siendo Chatwoot en un subdominio aparte; este dashboard provee deep-links y “single sign-on” para saltar a la conversación exacta.
+0) Stack y estándares (requerido)
+Framework: Next.js 14 (App Router) + TypeScript.
+UI: Tailwind CSS + shadcn/ui + lucide-react. Dark/Light.
+State/data: TanStack Query (React Query).
+Charts: Recharts.
+Editor: Monaco (con diff view) para prompts.
+Auth/SSO: OIDC (Auth0/Keycloak/Authentik). JWT HttpOnly.
+BFF (Backend for Frontend): rutas /api/* en el mismo proyecto (Node/Next) que hablan con:
+Postgres (via Prisma)
+n8n (webhooks internal/REST triggers)
+Chatwoot Application API (para enriquecer contactos y acciones admin)
+Chatwoot Public (Client) API (para deep-links y utilidades)
+HeyReach (HTTP o MCP si está habilitado)
+Realtime: SSE/WebSocket para colas y dashboards live.
+i18n: next-intl (ES default / EN opcional).
+Accesibilidad: WCAG AA, atajos de teclado (ej. g r → Reports).
+Seguridad: RBAC por organización; CSRF, rate-limit, audit log.
+1) Arquitectura de identidad y SSO (unificado)
+Meta: un único login para Dashboard + Chatwoot + (opcional) n8n.
+IdP OIDC central (Auth0/Keycloak).
+Dashboard: OIDC “First-party” → obtiene org_id, roles[] en los claims.
+Chatwoot y n8n:
+Si soportan SSO nativo OIDC/SAML → configurar como Service Provider del mismo IdP.
+Si no, poner oauth2-proxy/traefik-forward-auth delante para proteger con el IdP.
+Single sign-on UX: botón “Abrir Chatwoot” que salta a https://chat.<dominio>/app/accounts/<account_id>/conversations/<chatwoot_conversation_id> sin pedir login (ya hay SSO).
+Provisioning básico: tabla user ↔ organization en Postgres; mapeo de roles desde IdP a RBAC interno.
+Tablas mínimas (Prisma):
+organizations(id, name, slug, timezone)
+users(id, email, name, org_id, roles[])
+integrations(org_id, chatwoot:json, heyreach:json, n8n:json, idp:json)
+agent_configs(org_id, agent_type, system, output_schema, params_json, version, created_by, created_at)
+knowledge_items(id, org_id, title, source_type, url, status, tags[], bytes, lang, created_at)
+jobs(linkedin_jobs_incubadora): nos conectamos a la tabla ya existente (no duplicar)
+webhook_logs(id, org_id, source, event_id, status, payload_json, created_at)
+audit_logs(id, org_id, actor_user_id, action, target, before_json, after_json, created_at)
+2) Navegación de alto nivel
+Sidebar (agrupada):
+Overview (KPI del día y alertas)
+Conversations (lectura + deep-link a Chatwoot)
+Jobs Queue
+Agents & Prompts
+Knowledge
+Reports
+Integrations
+Settings (incluye Roles/Users, Follow-ups, Gating, Feature Flags)
+Webhooks (inspector)
+Billing (simple)
+Topbar: org switcher, global search, help, user menu.
+3) Páginas y features (detalle)
+3.1 Overview
+KPI cards: Accepted (HR) → Leads activos (CW) → Calificados → Agendados; TTFR, % AI-on, tokens/día, errores webhooks 24h.
+Live tiles: backlog pending, 429 HR rate-limit, latencias n8n.
+3.2 Conversations (lectura + deep-link)
+Tabla: user_id, nombre, sender_account_id, campaña HR, estado AI (ai-on/off), chatwoot_conversation_id, última interacción, etiquetas.
+Panel lateral:
+Identificadores: user_id = hr:<sender>:<lead>, hr_chatroom_id, chatwoot_contact_id.
+Enlaces sociales (de Chatwoot additional_attributes.social_profiles.linkedin).
+AI gating (toggle AI-on/off + “mute until”).
+Botones: “Abrir en Chatwoot”, “Forzar agente (Qualifier/Closer/Scheduler)”, “Reintentar job”.
+3.3 Jobs Queue
+Vistas: pending / processing / wait / ended.
+Acciones: priorizar, reintentar, cancelar, reasignar agente.
+Drawer de detalle: timeline (HR accepted → Create Contact → Create Conversation → mensajes → LLM I/O → errores).
+3.4 Agents & Prompts
+Lista de agentes: Qualifier, Closer, Scheduler, Objeciones, Pooling, FollowUps.
+Editor por agente (tabs):
+System Prompt (Monaco) con lint + hints.
+Output Schema (JSON schema).
+Params (model, temperature, max_tokens, token-budget mensual).
+Macros/Policies (regex/longitud, tuteo/voseo, etc.).
+Versioning: draft→publish, diff y rollback.
+Test Bench: simular entrada real (fixture), llamar BFF que ejecuta el nodo LLM en sandbox y devuelve JSON de salida + estimación de tokens/costo.
+Switch “Enable MCP tools” por agente (si está activo, el backend llama HeyReach vía MCP client en lugar de HTTP).
+3.5 Knowledge Hub
+Upload (PDF/CSV/MD) y Add URL; set de tags (industria, ICP), idioma, vigencia.
+Configuración de chunking (size/overlap), vista previa del split.
+Estado de indexación (queued/embedding/ready).
+Collections por org y scope por agente (checkbox por agente).
+RAG test: pregunta + top-k; mostrar pasajes (fuente, score).
+Botón “Re-index” y “Depublish”.
+3.6 Reports (KPI serios)
+Overview:
+Funnel HR→CW→Qualified→Scheduled; Response Rate, TTFR, % AI vs Humano; Tokens & Cost by day.
+Agents:
+Mensajes/lead, completitud de slots, next_status distribution, violaciones de guardrails, latencia, token/lead, tasa de éxito.
+Objections & Follow-ups:
+Top objeciones, resolución vs derivación, efectividad por follow-up #, tiempo a respuesta.
+Ops:
+Webhooks OK/errores, 429 HR, latencias por endpoint, backlog de jobs.
+Cohorts:
+Por país, profesión_normalizada, industria, campaña HR, sender_account_id.
+Cada reporte con filtros guardables, export CSV y drill-down.
+3.7 Integrations
+Chatwoot: dominio, Account ID (oculto en backend), Application API token (secret), Inbox Identifier (API Channel). Botón “Test” → crea contacto/conversación de prueba y envía 1 mensaje (usa BFF).
+HeyReach: API Key + CheckApiKey; set webhooks base (/hr-accepted, /hr-inbound, /hr-outbound).
+n8n: base URL de webhooks internos + healthcheck (status por workflow).
+MCP (opcional): endpoint del HeyReach MCP server (si lo usan), toggle “Use MCP”.
+3.8 Settings
+AI Gating defaults (leads de HR → AI-on; externos → AI-off), mute until window.
+Follow-ups policy: reglas y ventanas horarias.
+Users & Roles.
+Feature Flags.
+Webhooks Viewer (payloads, reintento manual).
+Audit Log (quién cambió qué y cuándo).
+Billing simple (consumo tokens, planes).
+4) API BFF (contratos que debe generar LOVABLE en /api/*)
+El frontend no habla directo con Postgres/Chatwoot/HR; todo pasa por el BFF.
+Auth & Org
+GET /api/me → { user, org, roles }
+GET /api/orgs | POST /api/orgs (admin)
+Integrations
+GET /api/integrations/status
+POST /api/integrations/chatwoot/test → create contact + conversation + send test message
+POST /api/integrations/heyreach/test → CheckApiKey
+GET /api/integrations/n8n/status
+Agents
+GET /api/agents
+PUT /api/agents/:agentType (guardar system/output_schema/params)
+POST /api/agents/:agentType/test (dry-run LLM + token estimate)
+Knowledge
+GET /api/knowledge
+POST /api/knowledge (upload/URL)
+PUT /api/knowledge/:id (tags, scope)
+DELETE /api/knowledge/:id
+POST /api/knowledge/:id/reindex
+POST /api/knowledge/search (RAG test)
+Conversations
+GET /api/conversations (paginado, filtros)
+GET /api/conversations/:id (detalle + timeline)
+POST /api/conversations/:id/actions { type: 'force_agent'|'toggle_ai'|'mute_until', ... }
+Jobs
+GET /api/jobs (cola)
+POST /api/jobs/:id/retry
+POST /api/jobs/:id/cancel
+POST /api/jobs/:id/reassign { agent_type }
+Reports
+GET /api/reports/overview?from&to
+GET /api/reports/agents?from&to
+GET /api/reports/funnel?from&to
+GET /api/reports/ops?from&to
+GET /api/reports/costs?from&to
+Webhooks (viewer)
+GET /api/webhooks/logs?source=status&limit
+Settings
+GET/PUT /api/settings/gating
+GET/PUT /api/settings/followups
+GET /api/audit
+El BFF usará Prisma contra Postgres (incluida la tabla existente linkedin_jobs_incubadora) y clientes HTTP/SDK para Chatwoot y HeyReach. Si MCP está habilitado, el BFF expone una capa que llama tools MCP en lugar de endpoints HTTP.
+5) UI components (a implementar por LOVABLE)
+AppShell: Sidebar + Topbar + Breadcrumbs + Theme toggle.
+DataTable reusable (sorting, filters, column chooser, save views, CSV).
+KPI Cards + Line/Bar/Stacked (Recharts).
+PromptEditor (Monaco, JSON schema validator, diff).
+Uploader (drag&drop) + Progress.
+RAG Viewer (pasajes con resaltado).
+WebhookLogViewer con búsqueda por event_id, chatwoot_conversation_id, hr_chatroom_id.
+Confirm Dialogs (reintento, cancelar, publicar).
+Toasts (éxito/error).
+Skeletons para cargas.
+CopyToClipboard para IDs.
+6) Seguridad/DevOps/Deployment (GCP)
+GCP Cloud Run para el Dashboard (Next SSR/BFF).
+Cloud SQL (Postgres) existente.
+Secret Manager: CHATWOOT_API_TOKEN, HR_API_KEY, OIDC_CLIENT_SECRET, etc.
+Cloud Load Balancer + SSL; Cloud Armor (WAF), CDN estático.
+Domains:
+app.incubadoragrowth.com → Dashboard
+chat.incubadoragrowth.com → Chatwoot
+n8n.incubadoragrowth.com → n8n
+CI/CD: GitHub Actions → build/test → deploy Cloud Run (staging/prod).
+Env vars (ejemplo):
+DATABASE_URL (Cloud SQL)
+CHATWOOT_BASE_URL=https://chat.incubadoragrowth.com
+CHATWOOT_ACCOUNT_ID=<id> (solo backend)
+CHATWOOT_API_TOKEN=<secret>
+CHATWOOT_INBOX_IDENTIFIER=<uuid>
+HEYREACH_API_KEY=<secret>
+N8N_BASE_URL=https://n8n.incubadoragrowth.com
+OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET
+NEXTAUTH_URL (si usan next-auth para OIDC)
+APP_TIMEZONE=America/Argentina/Buenos_Aires
+Observabilidad: logs estructurados, métricas (Prometheus style) y trazas de latencia en endpoints /api/*.
+Rate-limit (per org / per user) y audit log en cada mutación.
+7) Criterios de aceptación (QA)
+Onboarding integra Chatwoot/HeyReach/n8n e informa OK con pruebas en vivo.
+Agents & Prompts permite editar/versionar/testear con diff y estimación de tokens.
+Knowledge sube archivos/URLs, muestra progreso de indexación, permite RAG test.
+Jobs Queue lista estados y permite priorizar/reintentar/forzar agente.
+Reports muestran funnel, agentes, ops y costos con filtros guardables y export.
+Conversations lista leads con deep-link a Chatwoot y permite toggle AI-on/off y mute until.
+SSO: un login accede a Dashboard y hace SSO a Chatwoot (y n8n si está protegido).
+Seguridad: no se exponen secretos al cliente; todo llamado externo sale del BFF.
+8) Notas para LOVABLE (generación)
+Crear rutas y páginas arriba listadas, componentes y /api con mocks funcionales (BFF simulado) para dev.
+Dejar lib/api.ts con helpers (fetch JSON, manejo de errores).
+Estructurar lib/auth.ts (OIDC) preparado para NextAuth o passport-oidc.
+prisma/schema.prisma con tablas nuevas y model que apunte a linkedin_jobs_incubadora existente (modo read/write).
+Seeds de ejemplo: 2 orgs, 3 users, 6 agentes, 10 knowledge items, jobs simulados.
+Documentación README con variables .env y pasos de deploy en Cloud Run.
+Resultado esperado: un proyecto Next.js/TS completo, estandarizado y listo para conectar al backend actual, con UX limpia, rendimiento alto y todo lo necesario para operar Tramia (integraciones, prompts, knowledge, colas y reportes) en producción.
+Para la estética, pensá Tramia como “inteligencia operativa” con un look neo-minimal + brutalismo suave: superficies limpias y funcionales, micro-interacciones precisas y cero ornamento innecesario. Paleta: base carbón #0B0F14 / grafito #111827, contraste marfil #F8FAFC; acentos Tramia Cyan #06B6D4 (acciones primarias) y Tramia Lime #A3E635 (éxito/AI-on), más Amber #F59E0B (warning) y Rose #F43F5E (errores). Tipografía: Geist/Inter para UI y IBM Plex Mono para IDs y payloads (resalta lo técnico); tracking compacto, jerarquías claras (h1 28–32, h2 22–24, body 14–16). Componentes con esquinas 2xl, sombras suaves, y sutil frosted glass en toolbars/overlays (backdrop-blur-md). Motion sobrio: 120–180 ms, easing cubic-bezier(0.2, 0.8, 0.2, 1), spring en hover/press de CTAs; skeletons y pull-to-refresh en mobile. Motivo visual: líneas diagonales finas que evocan “vías” (Tramia = rieles para agentes) como watermark en headers de reportes. Charts con paleta accesible (azules/teales/anaranjados) y modo dark por defecto, light opcional; tooltips compactos y density toggle (Comfortable/Compact) para tablas densas. Accesibilidad AA, foco visible, estados vacíos con ilustraciones lineales monocromas, y CTAs “Tramia Cyan → Lime” en gradiente sutil para acciones clave. 
