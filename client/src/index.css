@@ -1,0 +1,270 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: hsl(210, 24%, 8%); /* #0B0F14 - Carbon */
+  --foreground: hsl(210, 17%, 97%); /* #F8FAFC - Ivory */
+  --card: hsl(215, 38%, 11%); /* #111827 - Graphite */
+  --card-foreground: hsl(210, 17%, 97%);
+  --popover: hsl(215, 38%, 11%);
+  --popover-foreground: hsl(210, 17%, 97%);
+  --primary: hsl(187, 95%, 43%); /* #06B6D4 - Tramia Cyan */
+  --primary-foreground: hsl(210, 24%, 8%);
+  --secondary: hsl(215, 33%, 20%); /* Darker graphite */
+  --secondary-foreground: hsl(210, 17%, 97%);
+  --muted: hsl(215, 33%, 20%);
+  --muted-foreground: hsl(215, 14%, 56%);
+  --accent: hsl(78, 76%, 58%); /* #A3E635 - Tramia Lime */
+  --accent-foreground: hsl(210, 24%, 8%);
+  --destructive: hsl(348, 90%, 60%); /* #F43F5E - Rose */
+  --destructive-foreground: hsl(210, 17%, 97%);
+  --warning: hsl(35, 92%, 50%); /* #F59E0B - Amber */
+  --warning-foreground: hsl(210, 24%, 8%);
+  --border: hsl(215, 33%, 20%);
+  --input: hsl(215, 33%, 20%);
+  --ring: hsl(187, 95%, 43%);
+  --chart-1: hsl(187, 95%, 43%);
+  --chart-2: hsl(78, 76%, 58%);
+  --chart-3: hsl(35, 92%, 50%);
+  --chart-4: hsl(348, 90%, 60%);
+  --chart-5: hsl(252, 83%, 67%);
+  --radius: 0px; /* Brutalist sharp corners */
+  
+  /* Sidebar variables */
+  --sidebar-background: hsl(215, 38%, 11%);
+  --sidebar-foreground: hsl(210, 17%, 97%);
+  --sidebar-primary: hsl(187, 95%, 43%);
+  --sidebar-primary-foreground: hsl(210, 24%, 8%);
+  --sidebar-accent: hsl(215, 33%, 20%);
+  --sidebar-accent-foreground: hsl(187, 95%, 43%);
+  --sidebar-border: hsl(215, 33%, 20%);
+  --sidebar-ring: hsl(187, 95%, 43%);
+  
+  /* Font families */
+  --font-sans: 'Geist', 'Inter', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+.dark {
+  --background: hsl(210, 24%, 8%);
+  --foreground: hsl(210, 17%, 97%);
+  --card: hsl(215, 38%, 11%);
+  --card-foreground: hsl(210, 17%, 97%);
+  --popover: hsl(215, 38%, 11%);
+  --popover-foreground: hsl(210, 17%, 97%);
+  --primary: hsl(187, 95%, 43%);
+  --primary-foreground: hsl(210, 24%, 8%);
+  --secondary: hsl(215, 33%, 20%);
+  --secondary-foreground: hsl(210, 17%, 97%);
+  --muted: hsl(215, 33%, 20%);
+  --muted-foreground: hsl(215, 14%, 56%);
+  --accent: hsl(78, 76%, 58%);
+  --accent-foreground: hsl(210, 24%, 8%);
+  --destructive: hsl(348, 90%, 60%);
+  --destructive-foreground: hsl(210, 17%, 97%);
+  --warning: hsl(35, 92%, 50%);
+  --warning-foreground: hsl(210, 24%, 8%);
+  --border: hsl(215, 33%, 20%);
+  --input: hsl(215, 33%, 20%);
+  --ring: hsl(187, 95%, 43%);
+}
+
+.light {
+  --background: hsl(0, 0%, 100%);
+  --foreground: hsl(210, 25%, 8%);
+  --card: hsl(0, 0%, 98%);
+  --card-foreground: hsl(210, 25%, 8%);
+  --popover: hsl(0, 0%, 100%);
+  --popover-foreground: hsl(210, 25%, 8%);
+  --primary: hsl(187, 95%, 43%);
+  --primary-foreground: hsl(0, 0%, 100%);
+  --secondary: hsl(210, 25%, 96%);
+  --secondary-foreground: hsl(210, 25%, 8%);
+  --muted: hsl(210, 25%, 96%);
+  --muted-foreground: hsl(215, 14%, 56%);
+  --accent: hsl(78, 76%, 58%);
+  --accent-foreground: hsl(210, 25%, 8%);
+  --destructive: hsl(348, 90%, 60%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --warning: hsl(35, 92%, 50%);
+  --warning-foreground: hsl(0, 0%, 100%);
+  --border: hsl(210, 25%, 90%);
+  --input: hsl(210, 25%, 96%);
+  --ring: hsl(187, 95%, 43%);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: var(--font-sans);
+  }
+  
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer components {
+  .brutalist-shadow {
+    box-shadow: 4px 4px 0px rgba(6, 182, 212, 0.3);
+  }
+  
+  .live-indicator {
+    animation: pulse-custom 2s infinite;
+  }
+  
+  .status-success {
+    color: hsl(78, 76%, 58%);
+  }
+  
+  .status-warning {
+    color: hsl(35, 92%, 50%);
+  }
+  
+  .status-error {
+    color: hsl(348, 90%, 60%);
+  }
+  
+  .status-info {
+    color: hsl(187, 95%, 43%);
+  }
+  
+  .fade-in {
+    animation: fadeIn 0.2s ease-in-out;
+  }
+  
+  .slide-in {
+    animation: slideIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+
+@keyframes pulse-custom {
+  0%, 100% { 
+    opacity: 1; 
+  }
+  50% { 
+    opacity: 0.7; 
+  }
+}
+
+@keyframes fadeIn {
+  from { 
+    opacity: 0; 
+  }
+  to { 
+    opacity: 1; 
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Scrollbar styling for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(215, 38%, 11%);
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(215, 33%, 20%);
+  border-radius: 0px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(187, 95%, 43%);
+}
+
+/* Typography scale following Tramia guidelines */
+h1 {
+  @apply text-3xl font-bold tracking-tight;
+}
+
+h2 {
+  @apply text-2xl font-semibold tracking-tight;
+}
+
+h3 {
+  @apply text-lg font-semibold;
+}
+
+.text-mono {
+  font-family: var(--font-mono);
+}
+
+/* Brutalist form elements */
+.brutalist-input {
+  @apply border-2 border-border bg-input text-foreground px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring transition-all;
+  border-radius: 0px;
+}
+
+.brutalist-button {
+  @apply px-4 py-2 font-medium transition-all focus:outline-none focus:ring-2 focus:ring-ring;
+  border-radius: 0px;
+}
+
+.brutalist-button-primary {
+  @apply brutalist-button bg-primary text-primary-foreground hover:bg-primary/90;
+}
+
+.brutalist-button-secondary {
+  @apply brutalist-button border border-border bg-background text-foreground hover:bg-muted;
+}
+
+/* Micro-interactions */
+.hover-lift {
+  transition: transform 0.12s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.hover-lift:hover {
+  transform: translateY(-1px);
+}
+
+.click-press {
+  transition: transform 0.08s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.click-press:active {
+  transform: translateY(1px);
+}
+
+/* Glassmorphism effects for overlays */
+.glass {
+  backdrop-filter: blur(16px);
+  background: rgba(17, 24, 39, 0.8);
+}
+
+/* Tramia diagonal lines watermark pattern */
+.watermark::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 10px,
+    rgba(6, 182, 212, 0.03) 10px,
+    rgba(6, 182, 212, 0.03) 11px
+  );
+  pointer-events: none;
+  z-index: -1;
+}
