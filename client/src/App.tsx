@@ -15,25 +15,31 @@ import Integrations from "@/pages/integrations";
 import Settings from "@/pages/settings";
 import Webhooks from "@/pages/webhooks";
 import Billing from "@/pages/billing";
+import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
 function Router() {
   return (
-    <AppShell>
-      <Switch>
-        <Route path="/" component={Overview} />
-        <Route path="/conversations" component={Conversations} />
-        <Route path="/jobs" component={Jobs} />
-        <Route path="/agents" component={Agents} />
-        <Route path="/knowledge" component={Knowledge} />
-        <Route path="/reports" component={Reports} />
-        <Route path="/integrations" component={Integrations} />
-        <Route path="/settings" component={Settings} />
-        <Route path="/webhooks" component={Webhooks} />
-        <Route path="/billing" component={Billing} />
-        <Route component={NotFound} />
-      </Switch>
-    </AppShell>
+    <Switch>
+      <Route path="/login" component={Login} />
+      <Route>
+        <AppShell>
+          <Switch>
+            <Route path="/" component={Overview} />
+            <Route path="/conversations" component={Conversations} />
+            <Route path="/jobs" component={Jobs} />
+            <Route path="/agents" component={Agents} />
+            <Route path="/knowledge" component={Knowledge} />
+            <Route path="/reports" component={Reports} />
+            <Route path="/integrations" component={Integrations} />
+            <Route path="/settings" component={Settings} />
+            <Route path="/webhooks" component={Webhooks} />
+            <Route path="/billing" component={Billing} />
+            <Route component={NotFound} />
+          </Switch>
+        </AppShell>
+      </Route>
+    </Switch>
   );
 }
 
