@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AppShell } from "@/components/app-shell";
+import { ProtectedRoute } from "@/components/protected-route";
 import Overview from "@/pages/overview";
 import Conversations from "@/pages/conversations";
 import Jobs from "@/pages/jobs";
@@ -23,21 +24,23 @@ function Router() {
     <Switch>
       <Route path="/login" component={Login} />
       <Route>
-        <AppShell>
-          <Switch>
-            <Route path="/" component={Overview} />
-            <Route path="/conversations" component={Conversations} />
-            <Route path="/jobs" component={Jobs} />
-            <Route path="/agents" component={Agents} />
-            <Route path="/knowledge" component={Knowledge} />
-            <Route path="/reports" component={Reports} />
-            <Route path="/integrations" component={Integrations} />
-            <Route path="/settings" component={Settings} />
-            <Route path="/webhooks" component={Webhooks} />
-            <Route path="/billing" component={Billing} />
-            <Route component={NotFound} />
-          </Switch>
-        </AppShell>
+        <ProtectedRoute>
+          <AppShell>
+            <Switch>
+              <Route path="/" component={Overview} />
+              <Route path="/conversations" component={Conversations} />
+              <Route path="/jobs" component={Jobs} />
+              <Route path="/agents" component={Agents} />
+              <Route path="/knowledge" component={Knowledge} />
+              <Route path="/reports" component={Reports} />
+              <Route path="/integrations" component={Integrations} />
+              <Route path="/settings" component={Settings} />
+              <Route path="/webhooks" component={Webhooks} />
+              <Route path="/billing" component={Billing} />
+              <Route component={NotFound} />
+            </Switch>
+          </AppShell>
+        </ProtectedRoute>
       </Route>
     </Switch>
   );

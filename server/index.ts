@@ -191,37 +191,12 @@ app.use((req, res, next) => {
     res.status(status).json({ message });
   });
 
+  // Let the SPA handle authentication state client-side
+  // Only protect API routes server-side (already done above)
+
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
-  // Protect SPA routes (redirect to /login if not authenticated)
-  app.use((req, res, next) => {
-    // Skip auth check for auth routes, admin routes, assets, and healthz
-    if (
-      req.path.startsWith('/auth') ||
-      req.path.startsWith('/admin') ||
-      req.path.startsWith('/assets') ||
-      req.path.startsWith('/healthz')
-    ) {
-      return next();
-    }
-    // API routes are already protected above
-    if (req.path.startsWith('/api')) {
-      return next();
-    }
-    // For GET requests to SPA routes, check authentication
-    if (req.method === 'GET') {
-      try {
-        jwt.verify(req.cookies[JWT_COOKIE], process.env.SESSION_SECRET!);
-        return next();
-      } catch {
-        // Redirect to login page for unauthenticated users
-        return res.redirect('/login');
-      }
-    }
-    next();
-  });
-
   if (app.get("env") === "development") {
     await setupVite(app, server);
   } else {
