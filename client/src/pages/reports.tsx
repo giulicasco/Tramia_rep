@@ -82,8 +82,8 @@ export default function Reports() {
 
   return (
     <div className="p-6 space-y-6 fade-in" data-testid="reports-page">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Header with Tramia railway watermark */}
+      <div className="relative flex items-center justify-between watermark">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Reports</h1>
           <p className="text-muted-foreground">Analytics and performance insights</p>

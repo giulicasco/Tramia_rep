@@ -30,7 +30,7 @@
   --chart-3: hsl(35, 92%, 50%);
   --chart-4: hsl(348, 90%, 60%);
   --chart-5: hsl(252, 83%, 67%);
-  --radius: 0px; /* Brutalist sharp corners */
+  --radius: 16px; /* 2xl corners for neo-minimal */
   
   /* Sidebar variables */
   --sidebar-background: hsl(215, 38%, 11%);
@@ -184,24 +184,38 @@
 
 ::-webkit-scrollbar-thumb {
   background: hsl(215, 33%, 20%);
-  border-radius: 0px;
+  border-radius: 16px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(187, 95%, 43%);
 }
 
-/* Typography scale following Tramia guidelines */
+/* Typography scale following Tramia neo-minimal guidelines */
 h1 {
   @apply text-3xl font-bold tracking-tight;
+  font-size: 2rem; /* 32px - upper range 28-32 */
+  line-height: 1.2;
+  letter-spacing: -0.025em;
 }
 
 h2 {
   @apply text-2xl font-semibold tracking-tight;
+  font-size: 1.5rem; /* 24px - range 22-24 */
+  line-height: 1.3;
+  letter-spacing: -0.015em;
 }
 
 h3 {
   @apply text-lg font-semibold;
+  font-size: 1.125rem; /* 18px */
+  line-height: 1.4;
+}
+
+body {
+  font-size: 0.875rem; /* 14px - range 14-16 */
+  line-height: 1.5;
+  letter-spacing: -0.005em;
 }
 
 .text-mono {
@@ -209,48 +223,85 @@ h3 {
 }
 
 /* Brutalist form elements */
-.brutalist-input {
-  @apply border-2 border-border bg-input text-foreground px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring transition-all;
-  border-radius: 0px;
+.tramia-input {
+  @apply border border-border bg-input text-foreground px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring transition-all;
+  border-radius: 16px;
+  transition: all 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.brutalist-button {
-  @apply px-4 py-2 font-medium transition-all focus:outline-none focus:ring-2 focus:ring-ring;
-  border-radius: 0px;
+.tramia-button {
+  @apply px-4 py-2 font-medium focus:outline-none focus:ring-2 focus:ring-ring;
+  border-radius: 16px;
+  transition: all 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.brutalist-button-primary {
-  @apply brutalist-button bg-primary text-primary-foreground hover:bg-primary/90;
+.tramia-button-primary {
+  @apply tramia-button bg-primary text-primary-foreground hover:bg-primary/90 cta-spring;
 }
 
-.brutalist-button-secondary {
-  @apply brutalist-button border border-border bg-background text-foreground hover:bg-muted;
+.tramia-button-secondary {
+  @apply tramia-button border border-border bg-background text-foreground hover:bg-muted hover-lift;
 }
 
-/* Micro-interactions */
+.tramia-button-gradient {
+  @apply tramia-button gradient-cta cta-spring font-semibold;
+}
+
+/* Tramia micro-interactions - 120-180ms timing */
 .hover-lift {
-  transition: transform 0.12s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .hover-lift:hover {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
 }
 
 .click-press {
-  transition: transform 0.08s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: all 0.12s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .click-press:active {
-  transform: translateY(1px);
+  transform: translateY(1px) scale(0.98);
 }
 
-/* Glassmorphism effects for overlays */
+/* Spring animation for CTAs */
+.cta-spring {
+  transition: all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cta-spring:hover {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 8px 25px -5px rgba(6, 182, 212, 0.3);
+}
+
+/* Gradient CTA Tramia Cyan → Lime */
+.gradient-cta {
+  background: linear-gradient(135deg, hsl(187, 95%, 43%) 0%, hsl(78, 76%, 58%) 100%);
+  color: hsl(210, 24%, 8%);
+}
+
+/* Frosted glass effects for toolbars/overlays */
 .glass {
-  backdrop-filter: blur(16px);
-  background: rgba(17, 24, 39, 0.8);
+  backdrop-filter: blur(12px);
+  background: rgba(17, 24, 39, 0.85);
 }
 
-/* Tramia diagonal lines watermark pattern */
+.toolbar-glass {
+  backdrop-filter: blur(12px);
+  background: rgba(11, 15, 20, 0.9);
+  border: 1px solid rgba(6, 182, 212, 0.1);
+}
+
+/* Soft shadows for neo-minimal */
+.soft-shadow {
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+}
+
+.soft-shadow-lg {
+  box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+}
+
+/* Tramia railway tracks watermark pattern - evokes "vías" for agent rails */
 .watermark::before {
   content: '';
   position: absolute;
@@ -258,13 +309,78 @@ h3 {
   left: 0;
   right: 0;
   bottom: 0;
-  background-image: repeating-linear-gradient(
-    45deg,
-    transparent,
-    transparent 10px,
-    rgba(6, 182, 212, 0.03) 10px,
-    rgba(6, 182, 212, 0.03) 11px
-  );
+  background-image: 
+    repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 20px,
+      rgba(6, 182, 212, 0.03) 20px,
+      rgba(6, 182, 212, 0.03) 21px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 20px,
+      rgba(163, 230, 53, 0.02) 20px,
+      rgba(163, 230, 53, 0.02) 21px
+    );
   pointer-events: none;
   z-index: -1;
+}
+
+/* Density control classes */
+.density-comfortable {
+  --table-padding-y: 0.75rem;
+  --table-padding-x: 1rem;
+  --spacing-unit: 1rem;
+}
+
+.density-compact {
+  --table-padding-y: 0.5rem;
+  --table-padding-x: 0.75rem;
+  --spacing-unit: 0.75rem;
+}
+
+/* Enhanced focus states for accessibility */
+.focus-tramia:focus {
+  outline: 2px solid hsl(187, 95%, 43%);
+  outline-offset: 2px;
+}
+
+/* Skeleton loading with Tramia colors */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    hsl(215, 33%, 20%) 25%,
+    hsl(215, 33%, 25%) 50%,
+    hsl(215, 33%, 20%) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Monospace text for IDs and payloads */
+.text-tech {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem; /* 13px */
+  letter-spacing: 0.025em;
+  color: hsl(187, 95%, 43%);
+}
+
+/* Chart accessibility with Tramia palette */
+.chart-accessible {
+  --chart-blue: hsl(214, 95%, 56%);
+  --chart-teal: hsl(187, 95%, 43%);
+  --chart-orange: hsl(35, 92%, 50%);
+  --chart-green: hsl(78, 76%, 58%);
+  --chart-purple: hsl(259, 94%, 51%);
 }

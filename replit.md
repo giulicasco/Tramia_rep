@@ -15,7 +15,15 @@ The application uses a modern React-based stack built with Vite as the build too
 
 **Routing**: The application uses Wouter for client-side routing, providing a lightweight alternative to React Router while maintaining essential navigation features.
 
-**Styling Strategy**: The design system implements a "brutalist" aesthetic with sharp corners and high contrast, using CSS custom properties for theming and consistent spacing. The theme supports both light and dark modes with comprehensive color tokens.
+**Styling Strategy**: The design system implements Tramia's "inteligencia operativa" (operational intelligence) aesthetic - a neo-minimal + soft brutalism approach featuring clean functional surfaces, precise micro-interactions, and zero unnecessary ornamentation. The system uses 2xl corner radius, soft shadows, and subtle frosted glass effects for toolbars/overlays.
+
+**Color Palette**: Carbon base (#0B0F14), Graphite surfaces (#111827), Ivory contrast (#F8FAFC), with Tramia Cyan (#06B6D4) for primary actions and Tramia Lime (#A3E635) for success/AI-on states. Warning states use Amber (#F59E0B) and errors use Rose (#F43F5E).
+
+**Typography**: Geist/Inter for UI text with compact tracking and clear hierarchies (h1: 28-32px, h2: 22-24px, body: 14-16px). IBM Plex Mono for technical elements like IDs and payloads to highlight technical content.
+
+**Motion System**: Sober motion with 120-180ms timing using cubic-bezier(0.2, 0.8, 0.2, 1) easing. Spring animations on hover/press for CTAs, with Tramia Cyan → Lime gradient for key actions.
+
+**Railway Watermarks**: Diagonal line patterns in headers evoke "vías" (railway tracks) representing the agent rail system concept.
 
 ## Backend Architecture
 The backend follows a Backend-for-Frontend (BFF) pattern built with Express.js and Node.js. This approach provides a tailored API layer that aggregates and transforms data from multiple backend services.
