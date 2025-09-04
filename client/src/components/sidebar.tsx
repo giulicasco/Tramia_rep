@@ -145,9 +145,9 @@ export function Sidebar() {
 
           return (
             <Link key={item.href} href={item.href}>
-              <a
+              <div
                 className={cn(
-                  "flex items-center space-x-3 px-3 py-2 transition-colors group",
+                  "flex items-center space-x-3 px-3 py-2 transition-colors group cursor-pointer",
                   isActive
                     ? "bg-sidebar-primary/10 text-sidebar-primary border-l-2 border-sidebar-primary"
                     : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
@@ -184,7 +184,7 @@ export function Sidebar() {
                     {item.shortcut}
                   </span>
                 )}
-              </a>
+              </div>
             </Link>
           );
         })}
@@ -197,9 +197,9 @@ export function Sidebar() {
 
           return (
             <Link key={item.href} href={item.href}>
-              <a
+              <div
                 className={cn(
-                  "flex items-center space-x-3 px-3 py-2 transition-colors group",
+                  "flex items-center space-x-3 px-3 py-2 transition-colors group cursor-pointer",
                   isActive
                     ? "bg-sidebar-primary/10 text-sidebar-primary border-l-2 border-sidebar-primary"
                     : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
@@ -231,7 +231,7 @@ export function Sidebar() {
                     {item.shortcut}
                   </span>
                 )}
-              </a>
+              </div>
             </Link>
           );
         })}
