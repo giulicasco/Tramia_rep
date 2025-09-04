@@ -2,6 +2,10 @@
 
 Tramia is an enterprise-grade customer and admin dashboard designed as a multi-tenant platform for managing AI-powered customer interactions. The system serves as a centralized control hub that connects with existing backend services (n8n, Postgres, Chatwoot, HeyReach) to provide comprehensive management of AI agents, conversations, knowledge bases, and operational workflows. The application focuses on lead qualification, customer engagement automation, and business intelligence reporting for growth-oriented organizations.
 
+# Recent Changes
+
+**January 2025**: Successfully converted the application to a Backend-for-Frontend (BFF) architecture that forwards all API calls directly to the user's existing n8n backend. The server now acts as a pure proxy layer, maintaining all existing frontend functionality while connecting to real n8n workflows for data operations. Environment variables (N8N_BASE, INTERNAL_KEY) have been configured for secure backend communication.
+
 # User Preferences
 
 Preferred communication style: Simple, everyday language.
@@ -26,11 +30,11 @@ The application uses a modern React-based stack built with Vite as the build too
 **Railway Watermarks**: Diagonal line patterns in headers evoke "vías" (railway tracks) representing the agent rail system concept.
 
 ## Backend Architecture
-The backend follows a Backend-for-Frontend (BFF) pattern built with Express.js and Node.js. This approach provides a tailored API layer that aggregates and transforms data from multiple backend services.
+The backend follows a Backend-for-Frontend (BFF) pattern built with Express.js and Node.js. The server acts as a pure forwarding proxy that routes all API requests directly to the user's existing n8n backend, maintaining the exact same API contracts while connecting to live n8n workflows for data operations.
 
-**Database Layer**: Drizzle ORM with PostgreSQL provides type-safe database operations and schema management. The database stores organizational data, user management, agent configurations, knowledge items, job queues, and audit logs.
+**n8n Integration**: All API endpoints forward requests to corresponding n8n webhook endpoints using the callN8N client function. Authentication is handled via x-internal-key headers for secure communication with the n8n backend.
 
-**API Design**: RESTful endpoints organized by domain (auth, integrations, agents, knowledge, conversations, etc.) with consistent error handling and response formatting.
+**API Design**: RESTful endpoints organized by domain (auth, integrations, agents, knowledge, conversations, etc.) with consistent error handling and response formatting. Each endpoint forwards requests to n8n webhooks at paths like `/webhook/tramia-*`.
 
 **Real-time Communication**: WebSocket support for live updates to dashboards and job queue status, ensuring users see real-time changes without manual refreshing.
 
