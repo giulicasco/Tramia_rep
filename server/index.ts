@@ -309,7 +309,7 @@ app.use((req, res, next) => {
         FROM public.linkedin_jobs_incubadora
         WHERE updated_at >= NOW() - interval '24 hours'
           AND (
-            NULLIF(data->'qualifier_llm'->>'is_task_complete','')::boolean IS TRUE
+            NULLIF(result_json->'qualifier_llm'->>'is_task_complete','')::boolean IS TRUE
             OR lower(status) LIKE 'qualif%'
           )
       ),
@@ -318,7 +318,7 @@ app.use((req, res, next) => {
         FROM public.linkedin_jobs_incubadora
         WHERE updated_at >= NOW() - interval '24 hours'
           AND (
-            NULLIF(data->'scheduler_llm'->>'is_task_complete','')::boolean IS TRUE
+            NULLIF(result_json->'scheduler_llm'->>'is_task_complete','')::boolean IS TRUE
             OR lower(status) LIKE 'schedul%' OR lower(status) LIKE 'booking%'
           )
       ),
@@ -330,7 +330,7 @@ app.use((req, res, next) => {
       ),
       ai_status AS (
         SELECT
-          sum((data->>'chatwoot_mode' = 'ai-on')::int) AS ai_on,
+          sum((chatwoot_mode = 'ai-on')::int) AS ai_on,
           count(*) AS total
         FROM public.linkedin_jobs_incubadora
       ),
@@ -391,18 +391,18 @@ app.use((req, res, next) => {
       WITH latest AS (
         SELECT
           id,
-          data->>'chatwoot_conversation_id' AS chatwoot_conversation_id,
+          chatwoot_conversation_id::text AS chatwoot_conversation_id,
           updated_at,
           COALESCE(
-            NULLIF(data->'closer_llm'->>'response_text',''),
-            NULLIF(data->'scheduler_llm'->>'response_text',''),
-            NULLIF(data->'objeciones_llm'->>'response_text',''),
-            NULLIF(data->'follow_up_llm'->>'response_text',''),
-            NULLIF(data->'qualifier_llm'->>'response_text',''),
+            NULLIF(result_json->'closer_llm'->>'response_text',''),
+            NULLIF(result_json->'scheduler_llm'->>'response_text',''),
+            NULLIF(result_json->'objeciones_llm'->>'response_text',''),
+            NULLIF(result_json->'follow_up_llm'->>'response_text',''),
+            NULLIF(result_json->'qualifier_llm'->>'response_text',''),
             'No hay mensaje registrado'
           ) AS last_message
         FROM public.linkedin_jobs_incubadora
-        WHERE data->>'chatwoot_conversation_id' IS NOT NULL
+        WHERE chatwoot_conversation_id IS NOT NULL
         ORDER BY updated_at DESC
       )
       SELECT DISTINCT ON (chatwoot_conversation_id)

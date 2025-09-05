@@ -1,0 +1,70 @@
+Agente, hemos resuelto los errores de conexión (HTTP 500), pero el Frontend sigue mostrando datos dummy en lugar de los datos reales de la base de datos. Necesito un diagnóstico completo del flujo de datos para identificar dónde se pierden los datos reales.
+
+Actúa como un Senior Staff Engineer y proporciona un reporte detallado siguiendo estos pasos:
+
+Tarea 1: Confirmación del Contexto de la Base de Datos
+Necesito estar 100% seguro de a qué base de datos y esquema está conectada la aplicación actualmente.
+
+Revisar Logs de Inicialización: Busca en los logs recientes las líneas [DB INIT VERIFY] (implementadas previamente) y reporta el Host y Database exactos que se muestran.
+
+Introspección de Contexto (Si los logs no son claros o no están presentes): Si los logs anteriores no están disponibles, implementa temporalmente este código en server/index.ts para verificar el contexto de conexión activo y reporta el resultado en los logs al iniciar.
+
+TypeScript
+
+async function verifyDBContext() {
+    try {
+        const contextQuery = `
+            SELECT 
+                current_database() as database, 
+                current_user as user, 
+                current_schema() as current_schema,
+                (SHOW search_path) as search_path;
+        `;
+        // Asumiendo que 'pool' es tu conexión global de Postgres
+        const { rows } = await pool.query(contextQuery);
+        console.log("[DB CONTEXT VERIFY] Contexto de conexión actual:", JSON.stringify(rows[0], null, 2));
+    } catch (error) {
+        console.error("[DB CONTEXT VERIFY] Error al verificar contexto de DB:", error);
+    }
+}
+
+// Llama a esta función después de inicializar el pool y antes de iniciar el servidor Express.
+// verifyDBContext(); 
+Tarea 2: Auditoría del Backend (BFF) y Flujo de Datos en Vivo
+Necesito ver qué devuelven las consultas SQL reales y si el código del BFF está interfiriendo.
+
+Verificar Instrumentación: Confirma que los logs de diagnóstico [DIAGNOSTICO BFF] (añadidos previamente en server/index.ts) siguen activos en los endpoints críticos:
+
+/api/metrics/overview
+
+/api/activity/recent-conversations
+
+Análisis de Logs en Vivo (CRUCIAL): Monitorea los logs del servidor mientras se carga el dashboard. Reporta textualmente las líneas que contienen [DIAGNOSTICO BFF] Resultado crudo....
+
+Objetivo: Determinar si el "Resultado crudo" contiene los datos reales de Neon o si está vacío ([] o {}).
+
+Auditoría de Código BFF: Revisa el código en server/index.ts para los endpoints mencionados. Busca cualquier lógica que pueda estar inyectando datos mock o dummy si los resultados de la DB están vacíos (e.g., if (rows.length === 0) return res.json(DUMMY_DATA);). Reporta cualquier código sospechoso.
+
+Tarea 3: Auditoría del Frontend (TanStack Query y Componentes)
+Necesito saber si el Frontend está ignorando los datos de la API.
+
+Auditoría de Hooks (TanStack Query): Inspecciona los hooks que usan useQuery para obtener los datos del overview (principalmente en client/src/pages/overview.tsx o archivos de hooks relacionados).
+
+Busca el uso de initialData, placeholderData, o fallbackData. Reporta cómo están configurados estos hooks.
+
+Auditoría de Componentes: Inspecciona los componentes que renderizan los datos (e.g., las tarjetas de KPIs, la lista de conversaciones en overview.tsx).
+
+Busca si el componente define variables locales con datos dummy (e.g., const DUMMY_KPIS = ...).
+
+Verifica cómo se utilizan los datos provenientes del hook (data). Busca lógica como const displayData = data || DUMMY_KPIS;. Reporta el código relevante.
+
+Resumen del Reporte Esperado
+Necesito que entregues un reporte consolidado con:
+
+Detalles exactos de la conexión DB (Host, DB, User, Schema) según los logs o la verificación de contexto.
+
+Logs textuales del [DIAGNOSTICO BFF] Resultado crudo... capturados durante una carga reciente del dashboard.
+
+Fragmentos de código del BFF si se encuentra lógica de fallback a datos dummy.
+
+Fragmentos de código del Frontend mostrando la configuración de TanStack Query (initialData) y cómo se renderizan los datos en los componentes.
