@@ -12,7 +12,7 @@ export async function api<T>(
 
 // Auth & User API
 export const authApi = {
-  getMe: () => api("GET", "/api/me"),
+  getMe: () => api("GET", "/auth/me"),
   getOrganizations: () => api("GET", "/api/orgs"),
   createOrganization: (data: any) => api("POST", "/api/orgs", data),
 };
