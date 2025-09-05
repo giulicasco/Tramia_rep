@@ -14,9 +14,7 @@ function validateEnvironment() {
   const requiredVars = [
     'DATABASE_URL',
     'SESSION_SECRET', 
-    'ADMIN_KEY',
-    'N8N_BASE',
-    'INTERNAL_KEY'
+    'ADMIN_KEY'
   ];
 
   const missing = requiredVars.filter(varName => !process.env[varName]);
@@ -261,9 +259,13 @@ app.use((req, res, next) => {
     res.json({ ok: true });
   });
 
-  app.get('/auth/me', requireAuth, (req, res) => {
-    const user = (req as any).user;
-    res.json({ email: user.email, role: user.role });
+  app.get('/auth/me', requireAuth, (_req, res) => {
+    const u = ( _req as any ).user as { email: string; role: string };
+    res.json({
+      isAuthenticated: true,
+      user: { email: u.email, role: u.role },
+      organization: { id: 'default', name: 'Tramia', slug: 'main' },
+    });
   });
 
   // Protect all API routes with authentication
