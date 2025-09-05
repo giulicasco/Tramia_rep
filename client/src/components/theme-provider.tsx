@@ -42,6 +42,13 @@ export function ThemeProvider({
   });
 
   useEffect(() => {
+    const root = document.documentElement;
+    const current = localStorage.getItem('tramia-theme') as 'light'|'dark'|null;
+    root.classList.remove('light','dark');
+    root.classList.add(current || 'dark');
+  }, []);
+
+  useEffect(() => {
     const root = window.document.documentElement;
 
     root.classList.remove("light", "dark");
