@@ -85,16 +85,10 @@ export function Sidebar() {
   }
 
   const { user, organization } = auth || {};
-
-  if (!user || !organization) {
-    return (
-      <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
-        <div className="p-4">
-          <div className="h-16 bg-muted animate-pulse rounded" />
-        </div>
-      </aside>
-    );
-  }
+  
+  // Use default organization if none provided
+  const org = organization || { id: 'default', name: 'Tramia', slug: 'main' };
+  const userInfo = user || { email: 'user@tramia.com', role: 'admin' };
 
   return (
     <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col" data-testid="sidebar">
@@ -111,10 +105,10 @@ export function Sidebar() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold text-sidebar-foreground truncate">
-                {organization.name}
+                {org.name}
               </div>
               <div className="text-xs text-muted-foreground font-mono truncate">
-                {organization.slug}
+                {org.slug}
               </div>
             </div>
             <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />

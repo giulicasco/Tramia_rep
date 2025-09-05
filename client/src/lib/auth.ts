@@ -1,11 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { authApi } from "./api";
-import type { AuthState, User, Organization, UserRole } from "@/types";
 
 // Hook to get current user and organization
 export function useAuth() {
-  return useQuery<AuthState>({
-    queryKey: ["/api/me"],
+  return useQuery({
+    queryKey: ["/auth/me"],
     queryFn: authApi.getMe,
     staleTime: 5 * 60 * 1000, // 5 minutes
     retry: false,
@@ -15,7 +14,7 @@ export function useAuth() {
 // Hook to check if user has required role
 export function useHasRole(requiredRole: string) {
   const { data: auth } = useAuth();
-  return auth?.roles?.includes(requiredRole) || auth?.roles?.includes("admin") || false;
+  return auth?.user?.role === requiredRole || auth?.user?.role === "admin" || false;
 }
 
 // Hook to check if user can perform action
@@ -32,7 +31,7 @@ export function useCanPerform(action: string) {
   };
 
   const allowedRoles = permissions[action as keyof typeof permissions] || [];
-  return auth?.roles?.some(role => allowedRoles.includes(role)) || false;
+  return allowedRoles.includes(auth?.user?.role) || false;
 }
 
 // Utility function to get display name initials

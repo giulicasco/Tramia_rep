@@ -43,6 +43,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       res.json(data); // { hrAccepted, activeLeads, qualified, scheduled, trends }
     } catch (e: any) {
+      if (String(e.message).includes("n8n_disabled")) return res.json({ hrAccepted: 0, activeLeads: 0, qualified: 0, scheduled: 0, trends: [] });
       res.status(500).json({ message: e.message || "Failed to fetch overview" });
     }
   });
@@ -89,6 +90,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const data = await callN8N(`/webhook/tramia-conversations-list`, undefined, { method: "GET" });
       res.json(data); // [ { id, user_id, name, chatwoot_conversation_id, ... } ]
     } catch (e: any) {
+      if (String(e.message).includes("n8n_disabled")) return res.json([]); // FE operates with empty
       res.status(500).json({ message: e.message || "Failed to fetch conversations" });
     }
   });
@@ -117,6 +119,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const data = await callN8N(`/webhook/tramia-jobs-list`, undefined, { method: "GET" });
       res.json(data);
     } catch (e: any) {
+      if (String(e.message).includes("n8n_disabled")) return res.json([]); // FE operates with empty
       res.status(500).json({ message: e.message || "Failed to fetch jobs" });
     }
   });

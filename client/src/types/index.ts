@@ -25,8 +25,15 @@ export type {
 
 // Auth state
 export interface AuthState {
-  user?: User & { roles?: UserRole[] };
-  organization?: Organization;
+  user?: {
+    email: string;
+    role: string;
+  };
+  organization?: {
+    id: string;
+    name: string;
+    slug: string;
+  };
   isAuthenticated?: boolean;
 }
 
