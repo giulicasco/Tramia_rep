@@ -11,7 +11,19 @@ import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // Allow Vite HMR and dev scripts
+      connectSrc: ["'self'", "ws:", "wss:", "http:", "https:"], // Allow WebSocket for HMR
+      imgSrc: ["'self'", "data:", "https:", "http:"],
+    },
+  },
+  crossOriginEmbedderPolicy: false, // Disable COEP for dev compatibility
+}));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());

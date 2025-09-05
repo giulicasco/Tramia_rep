@@ -26,9 +26,20 @@ export function ThemeProvider({
   storageKey = "tramia-theme",
   ...props
 }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem(storageKey) as Theme) || defaultTheme
-  );
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === "undefined") return defaultTheme;
+    
+    try {
+      const stored = localStorage.getItem(storageKey) as Theme;
+      if (stored && ["dark", "light", "system"].includes(stored)) {
+        return stored;
+      }
+    } catch (error) {
+      console.warn("Failed to read theme from localStorage:", error);
+    }
+    
+    return defaultTheme;
+  });
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -42,7 +53,16 @@ export function ThemeProvider({
         : "light";
 
       root.classList.add(systemTheme);
-      return;
+      
+      // Listen for changes in system theme preference
+      const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      const handleChange = (e: MediaQueryListEvent) => {
+        root.classList.remove("light", "dark");
+        root.classList.add(e.matches ? "dark" : "light");
+      };
+      
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
     }
 
     root.classList.add(theme);
@@ -50,9 +70,13 @@ export function ThemeProvider({
 
   const value = {
     theme,
-    setTheme: (theme: Theme) => {
-      localStorage.setItem(storageKey, theme);
-      setTheme(theme);
+    setTheme: (newTheme: Theme) => {
+      try {
+        localStorage.setItem(storageKey, newTheme);
+      } catch (error) {
+        console.warn("Failed to save theme to localStorage:", error);
+      }
+      setTheme(newTheme);
     },
   };
 

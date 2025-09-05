@@ -67,14 +67,15 @@ export function Topbar() {
           <Button
             variant="ghost"
             size="sm"
-            className="p-2 hover:bg-muted"
+            className="p-2 hover:bg-muted transition-all duration-200 hover:scale-105"
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             data-testid="theme-toggle"
+            title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
           >
             {theme === "dark" ? (
-              <Sun className="h-4 w-4" />
+              <Sun className="h-4 w-4 text-yellow-500 hover:text-yellow-400 transition-colors" />
             ) : (
-              <Moon className="h-4 w-4" />
+              <Moon className="h-4 w-4 text-blue-500 hover:text-blue-400 transition-colors" />
             )}
           </Button>
 
