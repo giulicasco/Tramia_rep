@@ -1,7 +1,15 @@
 import fetch from "node-fetch";
 
-const N8N_BASE = process.env.N8N_BASE!;
-const INTERNAL_KEY = process.env.INTERNAL_KEY!;
+// Validate n8n environment variables
+if (!process.env.N8N_BASE) {
+  throw new Error("N8N_BASE environment variable is required for n8n integration");
+}
+if (!process.env.INTERNAL_KEY) {
+  throw new Error("INTERNAL_KEY environment variable is required for n8n integration");
+}
+
+const N8N_BASE = process.env.N8N_BASE;
+const INTERNAL_KEY = process.env.INTERNAL_KEY;
 
 export async function callN8N(path: string, payload?: any, init: RequestInit = {}) {
   const url = `${N8N_BASE}${path}`;
