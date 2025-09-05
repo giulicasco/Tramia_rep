@@ -186,15 +186,15 @@ export function Sidebar() {
         <div className="flex items-center space-x-3">
           <Avatar className="h-8 w-8">
             <AvatarFallback className="bg-secondary text-secondary-foreground text-sm font-semibold">
-              {getInitials(user.name)}
+              {getInitials(userInfo.email)}
             </AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-sidebar-foreground truncate">
-              {user.name}
+              {userInfo.email}
             </div>
             <div className="text-xs text-muted-foreground truncate">
-              {formatRole(user.roles[0] || "viewer")}
+              {formatRole(userInfo.role || "admin")}
             </div>
           </div>
           <Button

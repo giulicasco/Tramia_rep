@@ -14,12 +14,14 @@ export function useAuth() {
 // Hook to check if user has required role
 export function useHasRole(requiredRole: string) {
   const { data: auth } = useAuth();
-  return auth?.user?.role === requiredRole || auth?.user?.role === "admin" || false;
+  const role = auth?.user?.role;
+  return role === requiredRole || role === "admin" || false;
 }
 
 // Hook to check if user can perform action
 export function useCanPerform(action: string) {
   const { data: auth } = useAuth();
+  const role = auth?.user?.role;
   
   // Simple permission mapping - in production this would be more sophisticated
   const permissions = {
@@ -31,11 +33,12 @@ export function useCanPerform(action: string) {
   };
 
   const allowedRoles = permissions[action as keyof typeof permissions] || [];
-  return allowedRoles.includes(auth?.user?.role) || false;
+  return allowedRoles.includes(role) || false;
 }
 
 // Utility function to get display name initials
-export function getInitials(name: string): string {
+export function getInitials(name?: string): string {
+  if (!name) return "U";
   return name
     .split(" ")
     .map(part => part.charAt(0).toUpperCase())
