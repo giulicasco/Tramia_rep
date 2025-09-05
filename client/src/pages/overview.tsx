@@ -53,15 +53,9 @@ export default function Overview() {
     );
   }
 
-  const m = metrics || {};
-  const queue = queueData || [];
-  const conversations = recentConversations || [];
-
-  // Calculate queue stats
-  const queueStats = queue.reduce((acc: any, item: any) => {
-    acc[item.status] = item.count;
-    return acc;
-  }, { pending: 0, processing: 0, wait: 0, done: 0, failed: 0 });
+  const m: any = metrics || {};
+  const queue: any[] = queueData || [];
+  const conversations: any[] = recentConversations || [];
 
   return (
     <div className="p-6 space-y-6 fade-in" data-testid="overview-page">

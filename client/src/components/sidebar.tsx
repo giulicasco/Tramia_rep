@@ -5,18 +5,15 @@ import {
   BarChart3,
   MessageSquare,
   ListTodo,
-  Bot,
   Brain,
   FileText,
   Settings,
   Webhook,
   CreditCard,
-  Plug,
   ExternalLink,
   ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 const navigationItems = [
@@ -31,29 +28,18 @@ const navigationItems = [
     href: "/conversations",
     icon: MessageSquare,
     shortcut: "g c",
-    badge: "24",
-    badgeVariant: "accent" as const,
   },
   {
     label: "Jobs Queue",
     href: "/jobs",
     icon: ListTodo,
     shortcut: "g j",
-    badge: "12",
-    badgeVariant: "warning" as const,
-  },
-  {
-    label: "Agents & Prompts",
-    href: "/agents",
-    icon: Bot,
-    shortcut: "g a",
   },
   {
     label: "Knowledge",
     href: "/knowledge",
     icon: Brain,
     shortcut: "g k",
-    count: "156",
   },
   {
     label: "Reports",
@@ -64,17 +50,6 @@ const navigationItems = [
 ];
 
 const settingsItems = [
-  {
-    label: "Integrations",
-    href: "/integrations",
-    icon: Plug,
-    shortcut: "g i",
-    status: [
-      { name: "Chatwoot", active: true },
-      { name: "HeyReach", active: true },
-      { name: "n8n", active: false },
-    ],
-  },
   {
     label: "Settings",
     href: "/settings",
@@ -157,26 +132,6 @@ export function Sidebar() {
                 <Icon className="h-4 w-4 flex-shrink-0" />
                 <span className="font-medium truncate">{item.label}</span>
                 
-                {/* Badge for active items */}
-                {item.badge && (
-                  <Badge
-                    variant={item.badgeVariant}
-                    className={cn(
-                      "ml-auto live-indicator font-mono text-xs",
-                      item.badgeVariant === "accent" && "bg-accent text-accent-foreground",
-                      item.badgeVariant === "warning" && "bg-warning text-warning-foreground"
-                    )}
-                  >
-                    {item.badge}
-                  </Badge>
-                )}
-
-                {/* Count for knowledge */}
-                {item.count && (
-                  <span className="ml-auto text-xs text-muted-foreground font-mono">
-                    {item.count}
-                  </span>
-                )}
 
                 {/* Keyboard shortcut hint */}
                 {!isActive && item.shortcut && (
@@ -209,21 +164,6 @@ export function Sidebar() {
                 <Icon className="h-4 w-4 flex-shrink-0" />
                 <span className="font-medium truncate">{item.label}</span>
 
-                {/* Integration status indicators */}
-                {item.status && (
-                  <div className="ml-auto flex space-x-1">
-                    {item.status.map((integration) => (
-                      <div
-                        key={integration.name}
-                        className={cn(
-                          "w-2 h-2 rounded-full",
-                          integration.active ? "bg-accent" : "bg-warning"
-                        )}
-                        title={`${integration.name} ${integration.active ? "connected" : "warning"}`}
-                      />
-                    ))}
-                  </div>
-                )}
 
                 {/* Keyboard shortcut hint */}
                 {!isActive && item.shortcut && (
