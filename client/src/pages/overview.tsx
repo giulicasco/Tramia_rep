@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { 
   UserPlus, 
@@ -7,9 +6,7 @@ import {
   CalendarCheck,
   Clock,
   Bot,
-  Coins,
   ExternalLink,
-  TestTubeDiagonal,
   Upload,
   BarChart3
 } from "lucide-react";
@@ -18,33 +15,31 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { reportsApi } from "@/lib/api";
-import { TramiaWebSocket } from "@/lib/api";
+import { api } from "@/lib/api";
 
 export default function Overview() {
-  const [liveData, setLiveData] = useState({});
-  const [ws] = useState(() => new TramiaWebSocket());
-
-  // Fetch overview data
-  const { data: overviewData, isLoading } = useQuery({
-    queryKey: ["/api/reports/overview"],
-    queryFn: () => reportsApi.getOverview(),
+  // Fetch metrics data
+  const { data: metrics, isLoading: metricsLoading } = useQuery({
+    queryKey: ["/api/metrics/overview"],
+    queryFn: () => api("GET", "/api/metrics/overview"),
+    refetchInterval: 30000, // Refresh every 30 seconds
   });
 
-  // Setup WebSocket for live updates
-  useEffect(() => {
-    ws.connect((data) => {
-      if (data.type === "live_update") {
-        setLiveData(data.data);
-      }
-    });
+  // Fetch queue status
+  const { data: queueData, isLoading: queueLoading } = useQuery({
+    queryKey: ["/api/queue/status"],
+    queryFn: () => api("GET", "/api/queue/status"),
+    refetchInterval: 30000,
+  });
 
-    return () => {
-      ws.disconnect();
-    };
-  }, [ws]);
+  // Fetch recent conversations
+  const { data: recentConversations, isLoading: conversationsLoading } = useQuery({
+    queryKey: ["/api/activity/recent-conversations"],
+    queryFn: () => api("GET", "/api/activity/recent-conversations"),
+    refetchInterval: 60000, // Refresh every 60 seconds
+  });
 
-  if (isLoading) {
+  if (metricsLoading || queueLoading || conversationsLoading) {
     return (
       <div className="p-6 space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -58,65 +53,42 @@ export default function Overview() {
     );
   }
 
-  const kpiData = overviewData || {
-    hrAccepted: 247,
-    activeLeads: 89,
-    qualified: 34,
-    scheduled: 18,
-    trends: {
-      hrAccepted: 12.3,
-      activeLeads: -2.1,
-      qualified: 8.7,
-      scheduled: 15.2
-    }
-  };
+  const m = metrics || {};
+  const queue = queueData || [];
+  const conversations = recentConversations || [];
+
+  // Calculate queue stats
+  const queueStats = queue.reduce((acc: any, item: any) => {
+    acc[item.status] = item.count;
+    return acc;
+  }, { pending: 0, processing: 0, wait: 0, done: 0, failed: 0 });
 
   return (
     <div className="p-6 space-y-6 fade-in" data-testid="overview-page">
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <KpiCard
-          title="HR Accepted"
-          value={kpiData.hrAccepted}
+          title="Accepted Invitations"
+          value={m.hr_accepted_24h || 0}
           icon={<UserPlus className="h-5 w-5" />}
-          trend={{
-            value: kpiData.trends.hrAccepted,
-            label: "vs yesterday",
-            positive: true,
-          }}
         />
         
         <KpiCard
           title="Active Leads"
-          value={kpiData.activeLeads}
+          value={m.active_leads || 0}
           icon={<MessageSquare className="h-5 w-5" />}
-          trend={{
-            value: kpiData.trends.activeLeads,
-            label: "conversion rate",
-            positive: false,
-          }}
         />
         
         <KpiCard
-          title="Qualified"
-          value={kpiData.qualified}
+          title="Qualified (24h)"
+          value={m.qualified_24h || 0}
           icon={<CheckCircle className="h-5 w-5" />}
-          trend={{
-            value: kpiData.trends.qualified,
-            label: "qualification rate",
-            positive: true,
-          }}
         />
         
         <KpiCard
-          title="Scheduled"
-          value={kpiData.scheduled}
+          title="Scheduled (24h)"
+          value={m.scheduled_24h || 0}
           icon={<CalendarCheck className="h-5 w-5" />}
-          trend={{
-            value: kpiData.trends.scheduled,
-            label: "booking rate",
-            positive: true,
-          }}
         />
       </div>
 
@@ -131,7 +103,9 @@ export default function Overview() {
               <Clock className="h-5 w-5 text-warning" />
             </div>
             <div className="space-y-2">
-              <div className="text-2xl font-bold text-foreground font-mono">2.4m</div>
+              <div className="text-2xl font-bold text-foreground font-mono">
+                {m.ttfr_seconds ? (m.ttfr_seconds / 60).toFixed(1) + 'm' : '0m'}
+              </div>
               <div className="text-xs text-muted-foreground">Time to First Response</div>
             </div>
           </CardContent>
@@ -146,23 +120,32 @@ export default function Overview() {
               <Bot className="h-5 w-5 text-accent" />
             </div>
             <div className="space-y-2">
-              <div className="text-2xl font-bold text-foreground">94%</div>
-              <div className="text-xs text-muted-foreground">Conversations AI-enabled</div>
+              <div className="text-2xl font-bold text-foreground">
+                {m.ai_total > 0 ? Math.round((m.ai_on / m.ai_total) * 100) + '%' : '0%'}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {m.ai_on || 0}/{m.ai_total || 0} conversations AI-enabled
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card data-testid="token-usage-metric">
+        <Card data-testid="queue-processing-metric">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                Tokens/Day
+                Queue
               </h3>
-              <Coins className="h-5 w-5 text-warning" />
+              <div className="flex space-x-1">
+                <div className="w-2 h-2 bg-warning rounded-full" />
+                <div className="w-2 h-2 bg-accent rounded-full live-indicator" />
+              </div>
             </div>
             <div className="space-y-2">
-              <div className="text-2xl font-bold text-foreground font-mono">847K</div>
-              <div className="text-xs text-muted-foreground">$23.42 estimated cost</div>
+              <div className="text-2xl font-bold text-foreground">
+                {m.queue_pending || 0} / {m.queue_processing || 0}
+              </div>
+              <div className="text-xs text-muted-foreground">Pending / Processing</div>
             </div>
           </CardContent>
         </Card>
@@ -177,151 +160,67 @@ export default function Overview() {
             <p className="text-sm text-muted-foreground">Real-time job processing overview</p>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Pending</span>
-              <Badge variant="outline" className="font-mono text-warning border-warning">
-                12
-              </Badge>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Processing</span>
-              <Badge variant="outline" className="font-mono text-accent border-accent live-indicator">
-                4
-              </Badge>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Completed (24h)</span>
-              <span className="text-sm font-mono text-foreground">1,247</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Failed (24h)</span>
-              <span className="text-sm font-mono text-destructive">3</span>
-            </div>
-            <div className="pt-4 border-t border-border">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Average Processing Time</span>
-                <span className="font-mono text-foreground">1.8s</span>
+            {queue.length === 0 ? (
+              <div className="text-center py-4">
+                <p className="text-sm text-muted-foreground">No data yet.</p>
               </div>
-            </div>
+            ) : (
+              queue.map((item: any) => (
+                <div key={item.status} className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground capitalize">{item.status}</span>
+                  <Badge 
+                    variant="outline" 
+                    className={`font-mono ${
+                      item.status === 'processing' ? 'text-accent border-accent live-indicator' :
+                      item.status === 'pending' ? 'text-warning border-warning' :
+                      item.status === 'failed' ? 'text-destructive border-destructive' :
+                      'text-muted-foreground'
+                    }`}
+                  >
+                    {item.count}
+                  </Badge>
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
 
-        {/* System Health */}
-        <Card data-testid="system-health">
+        {/* Recent Conversations */}
+        <Card data-testid="recent-conversations">
           <CardHeader className="pb-3">
-            <h3 className="text-lg font-semibold text-foreground">System Health</h3>
-            <p className="text-sm text-muted-foreground">Integration status and alerts</p>
+            <h3 className="text-lg font-semibold text-foreground">Recent Conversations</h3>
+            <p className="text-sm text-muted-foreground">Latest 3 conversations with last messages</p>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="w-3 h-3 bg-accent rounded-full live-indicator" />
-                <span className="text-sm text-foreground">Chatwoot</span>
+            {conversations.length === 0 ? (
+              <div className="text-center py-4">
+                <p className="text-sm text-muted-foreground">No activity yet.</p>
               </div>
-              <span className="text-xs font-mono text-muted-foreground">98ms</span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="w-3 h-3 bg-warning rounded-full" />
-                <span className="text-sm text-foreground">HeyReach</span>
-              </div>
-              <span className="text-xs font-mono text-warning">Rate Limited</span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="w-3 h-3 bg-accent rounded-full live-indicator" />
-                <span className="text-sm text-foreground">n8n Workflows</span>
-              </div>
-              <span className="text-xs font-mono text-muted-foreground">142ms</span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="w-3 h-3 bg-accent rounded-full live-indicator" />
-                <span className="text-sm text-foreground">Database</span>
-              </div>
-              <span className="text-xs font-mono text-muted-foreground">23ms</span>
-            </div>
-
-            <div className="pt-4 border-t border-border">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Webhook Errors (24h)</span>
-                <span className="font-mono text-destructive">2</span>
-              </div>
-            </div>
+            ) : (
+              conversations.map((conv: any) => (
+                <div key={conv.conversation_id} className="flex items-start space-x-3 p-3 border border-border rounded-lg">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback className="bg-accent text-accent-foreground text-xs font-mono">
+                      #{conv.conversation_id?.toString().slice(-2) || '??'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-foreground font-medium">
+                      Conversation #{conv.conversation_id}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1 truncate">
+                      {conv.last_message}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {new Date(conv.at).toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
       </div>
-
-      {/* Recent Activity Feed */}
-      <Card data-testid="recent-activity">
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-foreground">Recent Activity</h3>
-            <Button variant="link" size="sm" className="text-primary hover:text-primary/80">
-              View All
-            </Button>
-          </div>
-          <p className="text-sm text-muted-foreground">Latest system events and user actions</p>
-        </CardHeader>
-        <CardContent className="divide-y divide-border">
-          <div className="py-4 flex items-start space-x-4">
-            <Avatar className="h-8 w-8">
-              <AvatarFallback className="bg-accent text-accent-foreground text-xs font-mono">
-                AI
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm text-foreground">
-                Agent <span className="font-mono text-primary">Qualifier</span> processed conversation{" "}
-                <span className="font-mono text-primary">cw_1a2b3c</span>
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                2 minutes ago • Lead qualified for scheduling
-              </div>
-            </div>
-            <div className="text-xs text-muted-foreground font-mono">16:40:23</div>
-          </div>
-
-          <div className="py-4 flex items-start space-x-4">
-            <Avatar className="h-8 w-8">
-              <AvatarFallback className="bg-warning text-warning-foreground text-xs">
-                ⚠
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm text-foreground">
-                HeyReach rate limit reached for account{" "}
-                <span className="font-mono text-primary">hr_sender_01</span>
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                5 minutes ago • 12 jobs paused, retry at 17:00
-              </div>
-            </div>
-            <div className="text-xs text-muted-foreground font-mono">16:37:45</div>
-          </div>
-
-          <div className="py-4 flex items-start space-x-4">
-            <Avatar className="h-8 w-8">
-              <AvatarFallback className="bg-secondary text-secondary-foreground text-xs font-semibold">
-                JD
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm text-foreground">
-                Juan Díaz updated agent prompt for{" "}
-                <span className="font-mono text-primary">Closer</span>
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                8 minutes ago • Version 1.4.2 published
-              </div>
-            </div>
-            <div className="text-xs text-muted-foreground font-mono">16:34:12</div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Quick Actions Panel */}
       <Card data-testid="quick-actions">
@@ -329,23 +228,21 @@ export default function Overview() {
           <h3 className="text-lg font-semibold text-foreground">Quick Actions</h3>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Button
-              className="flex items-center space-x-3 p-4 h-auto bg-primary text-primary-foreground hover:bg-primary/90 hover-lift click-press"
-              data-testid="action-open-chatwoot"
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <a
+              href="https://chat.incubadoragrowth.com/app/accounts/1/inbox-view"
+              target="_blank" 
+              rel="noreferrer"
+              className="inline-flex"
             >
-              <ExternalLink className="h-4 w-4" />
-              <span className="font-medium">Open Chatwoot</span>
-            </Button>
-
-            <Button
-              variant="outline"
-              className="flex items-center space-x-3 p-4 h-auto hover-lift click-press"
-              data-testid="action-test-agents"
-            >
-              <TestTubeDiagonal className="h-4 w-4" />
-              <span className="font-medium">Test Agents</span>
-            </Button>
+              <Button
+                className="flex items-center space-x-3 p-4 h-auto bg-primary text-primary-foreground hover:bg-primary/90 hover-lift click-press w-full"
+                data-testid="action-open-chat"
+              >
+                <ExternalLink className="h-4 w-4" />
+                <span className="font-medium">Open Chat</span>
+              </Button>
+            </a>
 
             <Button
               variant="outline"
