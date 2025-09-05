@@ -26,10 +26,7 @@ function validateEnvironment() {
   }
 
   // Set NODE_ENV to production if not specified in production environment
-  if (!process.env.NODE_ENV) {
-    process.env.NODE_ENV = 'production';
-    console.log('🔧 NODE_ENV not specified, defaulting to production');
-  }
+  // Keep NODE_ENV as-is for proper development/production behavior
 
   // Validate PORT
   const port = process.env.PORT;
@@ -89,10 +86,11 @@ async function initializeDatabase() {
   }
 }
 
-// Ensure admin_users table exists with retry logic
+// Ensure database tables exist with retry logic
 async function ensureTables(retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
+      // Create admin_users table
       await pool.query(`
         CREATE TABLE IF NOT EXISTS public.admin_users (
           id BIGSERIAL PRIMARY KEY,
@@ -103,10 +101,26 @@ async function ensureTables(retries = 3) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
       `);
-      console.log('✅ Database table admin_users ensured');
+      
+      // Create hr_inbound_seen table with index
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS public.hr_inbound_seen (
+          id BIGSERIAL PRIMARY KEY,
+          user_id TEXT,
+          seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          source TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_hr_seen_at ON public.hr_inbound_seen(seen_at);
+      `);
+      
+      console.log('✅ Database tables and indexes ensured');
       return;
     } catch (error) {
-      console.error(`❌ Failed to create admin_users table (attempt ${attempt}/${retries}):`, error);
+      console.error(`❌ Failed to create database tables (attempt ${attempt}/${retries}):`, error);
       if (attempt === retries) {
         console.error('💥 Database initialization failed after all retries');
         throw error;
@@ -274,7 +288,9 @@ app.use((req, res, next) => {
   // === METRICS: /api/metrics/overview ===
   // Devuelve 0 si no hay datos; el FE renombra la tarjeta a "Accepted Invitations"
   app.get('/api/metrics/overview', async (_req, res) => {
-    console.log("[DIAGNOSTICO BFF] Solicitando /api/metrics/overview");
+    if (process.env.DEBUG_DIAGNOSTICS) {
+      console.log("[DIAGNOSTICO BFF] Solicitando /api/metrics/overview");
+    }
     try {
       const sql = `
       WITH
@@ -293,7 +309,7 @@ app.use((req, res, next) => {
         FROM public.linkedin_jobs_incubadora
         WHERE updated_at >= NOW() - interval '24 hours'
           AND (
-            (data->'qualifier_llm'->>'is_task_complete')::bool IS TRUE
+            NULLIF(data->'qualifier_llm'->>'is_task_complete','')::boolean IS TRUE
             OR lower(status) LIKE 'qualif%'
           )
       ),
@@ -302,7 +318,7 @@ app.use((req, res, next) => {
         FROM public.linkedin_jobs_incubadora
         WHERE updated_at >= NOW() - interval '24 hours'
           AND (
-            (data->'scheduler_llm'->>'is_task_complete')::bool IS TRUE
+            NULLIF(data->'scheduler_llm'->>'is_task_complete','')::boolean IS TRUE
             OR lower(status) LIKE 'schedul%' OR lower(status) LIKE 'booking%'
           )
       ),
@@ -334,11 +350,11 @@ app.use((req, res, next) => {
       `;
       const { rows } = await pool.query(sql);
       
-      // >>> AÑADIR ESTOS LOGS <<<
-      console.log("[DIAGNOSTICO BFF] Resultado crudo de PostgreSQL:", JSON.stringify(rows, null, 2));
-
-      if (!rows || rows.length === 0) {
-        console.log("[DIAGNOSTICO BFF] Advertencia: PostgreSQL devolvió un array vacío o nulo.");
+      if (process.env.DEBUG_DIAGNOSTICS) {
+        console.log("[DIAGNOSTICO BFF] Resultado crudo de PostgreSQL:", JSON.stringify(rows, null, 2));
+        if (!rows || rows.length === 0) {
+          console.log("[DIAGNOSTICO BFF] Advertencia: PostgreSQL devolvió un array vacío o nulo.");
+        }
       }
 
       res.json(rows[0]);
@@ -367,7 +383,9 @@ app.use((req, res, next) => {
   // === RECENT CONVERSATIONS: /api/activity/recent-conversations ===
   // Últimas 3 conversaciones distintas con su último mensaje detectado en data json
   app.get('/api/activity/recent-conversations', async (_req, res) => {
-    console.log("[DIAGNOSTICO BFF] Solicitando /api/activity/recent-conversations");
+    if (process.env.DEBUG_DIAGNOSTICS) {
+      console.log("[DIAGNOSTICO BFF] Solicitando /api/activity/recent-conversations");
+    }
     try {
       const sql = `
       WITH latest AS (
@@ -398,11 +416,11 @@ app.use((req, res, next) => {
       `;
       const { rows } = await pool.query(sql);
       
-      // >>> AÑADIR ESTOS LOGS <<<
-      console.log("[DIAGNOSTICO BFF] Resultado crudo de PostgreSQL:", JSON.stringify(rows, null, 2));
-
-      if (!rows || rows.length === 0) {
-        console.log("[DIAGNOSTICO BFF] Advertencia: PostgreSQL devolvió un array vacío o nulo.");
+      if (process.env.DEBUG_DIAGNOSTICS) {
+        console.log("[DIAGNOSTICO BFF] Resultado crudo de PostgreSQL:", JSON.stringify(rows, null, 2));
+        if (!rows || rows.length === 0) {
+          console.log("[DIAGNOSTICO BFF] Advertencia: PostgreSQL devolvió un array vacío o nulo.");
+        }
       }
 
       const conversations = rows.map(r => ({

@@ -12,8 +12,10 @@ export async function api<T>(
     throw new Error('Network response was not ok');
   }
   const result = await response.json();
-  // >>> AÑADIR ESTE LOG <<<
-  console.log(`[DIAGNOSTICO FE] Datos recibidos en TanStack Query para ${url}:`, result);
+  // Only log in development or when explicitly enabled
+  if (import.meta.env.DEV || import.meta.env.VITE_DEBUG_DIAGNOSTICS) {
+    console.log(`[DIAGNOSTICO FE] Datos recibidos en TanStack Query para ${url}:`, result);
+  }
   return result;
 }
 
