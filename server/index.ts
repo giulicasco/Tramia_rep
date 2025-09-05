@@ -9,6 +9,41 @@ const { Pool } = pg;
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
+// Environment variable validation
+function validateEnvironment() {
+  const requiredVars = [
+    'DATABASE_URL',
+    'SESSION_SECRET', 
+    'ADMIN_KEY',
+    'N8N_BASE',
+    'INTERNAL_KEY'
+  ];
+
+  const missing = requiredVars.filter(varName => !process.env[varName]);
+  
+  if (missing.length > 0) {
+    console.error('❌ Missing required environment variables:', missing.join(', '));
+    console.error('Please ensure all production secrets are properly configured in deployment settings.');
+    process.exit(1);
+  }
+
+  // Set NODE_ENV to production if not specified in production environment
+  if (!process.env.NODE_ENV) {
+    process.env.NODE_ENV = 'production';
+    console.log('🔧 NODE_ENV not specified, defaulting to production');
+  }
+
+  // Validate PORT
+  const port = process.env.PORT;
+  if (port && (isNaN(parseInt(port)) || parseInt(port) <= 0)) {
+    console.error('❌ Invalid PORT environment variable:', port);
+    process.exit(1);
+  }
+
+  console.log('✅ Environment validation passed');
+  console.log(`🌍 Running in ${process.env.NODE_ENV} mode`);
+}
+
 const app = express();
 app.set('trust proxy', 1);
 app.use(helmet({
@@ -28,25 +63,59 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 
-// Database connection
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// Database connection with enhanced error handling
+let pool: pg.Pool;
 
-// Ensure admin_users table exists
-async function ensureTables() {
+async function initializeDatabase() {
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS public.admin_users (
-        id BIGSERIAL PRIMARY KEY,
-        email TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'admin',
-        is_active BOOLEAN NOT NULL DEFAULT TRUE,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-    `);
-    log('Database table admin_users ensured');
+    console.log('🔄 Initializing database connection...');
+    pool = new Pool({ 
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+
+    // Test database connection
+    const client = await pool.connect();
+    await client.query('SELECT NOW()');
+    client.release();
+    console.log('✅ Database connection established');
+    
+    return pool;
   } catch (error) {
-    console.error('Failed to create admin_users table:', error);
+    console.error('❌ Database connection failed:', error);
+    console.error('Please verify DATABASE_URL is properly formatted for PostgreSQL connection');
+    throw error;
+  }
+}
+
+// Ensure admin_users table exists with retry logic
+async function ensureTables(retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS public.admin_users (
+          id BIGSERIAL PRIMARY KEY,
+          email TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'admin',
+          is_active BOOLEAN NOT NULL DEFAULT TRUE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      console.log('✅ Database table admin_users ensured');
+      return;
+    } catch (error) {
+      console.error(`❌ Failed to create admin_users table (attempt ${attempt}/${retries}):`, error);
+      if (attempt === retries) {
+        console.error('💥 Database initialization failed after all retries');
+        throw error;
+      }
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+    }
   }
 }
 
@@ -113,8 +182,15 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Initialize database tables
-  await ensureTables();
+  try {
+    // Validate environment variables first
+    validateEnvironment();
+    
+    // Initialize database connection
+    await initializeDatabase();
+    
+    // Initialize database tables
+    await ensureTables();
 
   // Health check endpoint
   app.get('/healthz', async (_req, res) => {
@@ -364,12 +440,23 @@ app.use((req, res, next) => {
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
-    log(`serving on port ${port}`);
-  });
+    const port = parseInt(process.env.PORT || '5000', 10);
+    server.listen({
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    }, () => {
+      console.log('🚀 Tramia dashboard server started successfully');
+      log(`serving on port ${port}`);
+    });
+
+  } catch (error) {
+    console.error('💥 Application startup failed:', error);
+    console.error('This may be due to:');
+    console.error('- Missing required environment variables or secrets configuration');
+    console.error('- Database connection or initialization failure');
+    console.error('- Invalid PORT environment variable');
+    console.error('Please check your deployment configuration and try again.');
+    process.exit(1);
+  }
 })();
