@@ -7,7 +7,14 @@ export async function api<T>(
   data?: unknown
 ): Promise<T> {
   const response = await apiRequest(method, url, data);
-  return response.json();
+  // CRUCIAL: TanStack Query necesita que se lance un error si la respuesta no es OK.
+  if (!response.ok) {
+    throw new Error('Network response was not ok');
+  }
+  const result = await response.json();
+  // >>> AÑADIR ESTE LOG <<<
+  console.log(`[DIAGNOSTICO FE] Datos recibidos en TanStack Query para ${url}:`, result);
+  return result;
 }
 
 // Auth & User API

@@ -274,6 +274,7 @@ app.use((req, res, next) => {
   // === METRICS: /api/metrics/overview ===
   // Devuelve 0 si no hay datos; el FE renombra la tarjeta a "Accepted Invitations"
   app.get('/api/metrics/overview', async (_req, res) => {
+    console.log("[DIAGNOSTICO BFF] Solicitando /api/metrics/overview");
     try {
       const sql = `
       WITH
@@ -283,18 +284,17 @@ app.use((req, res, next) => {
         WHERE seen_at >= NOW() - interval '24 hours'
       ),
       active_leads AS (
-        SELECT count(DISTINCT user_id) AS c
+        SELECT count(DISTINCT id) AS c
         FROM public.linkedin_jobs_incubadora
         WHERE status IN ('pending','processing','wait')
-          AND (chatwoot_mode = 'ai-on' OR chatwoot_mode IS NULL)
       ),
       qualified_24h AS (
         SELECT count(*) AS c
         FROM public.linkedin_jobs_incubadora
         WHERE updated_at >= NOW() - interval '24 hours'
           AND (
-            (result_json->'qualifier_llm'->>'is_task_complete')::bool IS TRUE
-            OR lower(conversation_status) LIKE 'qualif%'
+            (data->'qualifier_llm'->>'is_task_complete')::bool IS TRUE
+            OR lower(status) LIKE 'qualif%'
           )
       ),
       scheduled_24h AS (
@@ -302,8 +302,8 @@ app.use((req, res, next) => {
         FROM public.linkedin_jobs_incubadora
         WHERE updated_at >= NOW() - interval '24 hours'
           AND (
-            (result_json->'scheduler_llm'->>'is_task_complete')::bool IS TRUE
-            OR lower(conversation_status) LIKE 'schedul%' OR lower(conversation_status) LIKE 'booking%'
+            (data->'scheduler_llm'->>'is_task_complete')::bool IS TRUE
+            OR lower(status) LIKE 'schedul%' OR lower(status) LIKE 'booking%'
           )
       ),
       queue AS (
@@ -314,16 +314,12 @@ app.use((req, res, next) => {
       ),
       ai_status AS (
         SELECT
-          sum((chatwoot_mode='ai-on')::int) AS ai_on,
+          sum((data->>'chatwoot_mode' = 'ai-on')::int) AS ai_on,
           count(*) AS total
         FROM public.linkedin_jobs_incubadora
       ),
       ttfr AS (
-        SELECT avg(extract(epoch from (last_human_message_at - last_lead_message_at))) AS seconds
-        FROM public.linkedin_jobs_incubadora
-        WHERE last_human_message_at IS NOT NULL
-          AND last_lead_message_at IS NOT NULL
-          AND last_human_message_at >= NOW() - interval '24 hours'
+        SELECT 0::numeric AS seconds
       )
       SELECT
         COALESCE((SELECT c FROM hr_accepted),0)       AS hr_accepted_24h,
@@ -337,9 +333,18 @@ app.use((req, res, next) => {
         COALESCE((SELECT seconds FROM ttfr),0)        AS ttfr_seconds;
       `;
       const { rows } = await pool.query(sql);
+      
+      // >>> AÑADIR ESTOS LOGS <<<
+      console.log("[DIAGNOSTICO BFF] Resultado crudo de PostgreSQL:", JSON.stringify(rows, null, 2));
+
+      if (!rows || rows.length === 0) {
+        console.log("[DIAGNOSTICO BFF] Advertencia: PostgreSQL devolvió un array vacío o nulo.");
+      }
+
       res.json(rows[0]);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message || 'metrics_failed' });
+    } catch (error: any) {
+      console.error("[DIAGNOSTICO BFF] ERROR en PostgreSQL:", error.message, error.stack);
+      res.status(500).json({ error: 'Internal Server Error' });
     }
   });
 
@@ -360,44 +365,58 @@ app.use((req, res, next) => {
   });
 
   // === RECENT CONVERSATIONS: /api/activity/recent-conversations ===
-  // Últimas 3 conversaciones distintas con su último mensaje detectado en result_json
+  // Últimas 3 conversaciones distintas con su último mensaje detectado en data json
   app.get('/api/activity/recent-conversations', async (_req, res) => {
+    console.log("[DIAGNOSTICO BFF] Solicitando /api/activity/recent-conversations");
     try {
       const sql = `
       WITH latest AS (
         SELECT
           id,
-          chatwoot_conversation_id,
+          data->>'chatwoot_conversation_id' AS chatwoot_conversation_id,
           updated_at,
           COALESCE(
-            NULLIF(result_json->'closer_llm'->>'response_text',''),
-            NULLIF(result_json->'scheduler_llm'->>'response_text',''),
-            NULLIF(result_json->'objeciones_llm'->>'response_text',''),
-            NULLIF(result_json->'follow_up_llm'->>'response_text',''),
-            NULLIF(result_json->'qualifier_llm'->>'response_text','')
+            NULLIF(data->'closer_llm'->>'response_text',''),
+            NULLIF(data->'scheduler_llm'->>'response_text',''),
+            NULLIF(data->'objeciones_llm'->>'response_text',''),
+            NULLIF(data->'follow_up_llm'->>'response_text',''),
+            NULLIF(data->'qualifier_llm'->>'response_text',''),
+            'No hay mensaje registrado'
           ) AS last_message
         FROM public.linkedin_jobs_incubadora
-        WHERE chatwoot_conversation_id IS NOT NULL
+        WHERE data->>'chatwoot_conversation_id' IS NOT NULL
         ORDER BY updated_at DESC
       )
       SELECT DISTINCT ON (chatwoot_conversation_id)
         chatwoot_conversation_id,
         id AS job_id,
-        COALESCE(last_message, 'No hay mensaje registrado') AS last_message,
+        last_message,
         updated_at
       FROM latest
       ORDER BY chatwoot_conversation_id, updated_at DESC
       LIMIT 3;
       `;
       const { rows } = await pool.query(sql);
-      res.json(rows.map(r => ({
+      
+      // >>> AÑADIR ESTOS LOGS <<<
+      console.log("[DIAGNOSTICO BFF] Resultado crudo de PostgreSQL:", JSON.stringify(rows, null, 2));
+
+      if (!rows || rows.length === 0) {
+        console.log("[DIAGNOSTICO BFF] Advertencia: PostgreSQL devolvió un array vacío o nulo.");
+      }
+
+      const conversations = rows.map(r => ({
         conversation_id: r.chatwoot_conversation_id,
         job_id: r.job_id,
         last_message: r.last_message,
         at: r.updated_at
-      })));
-    } catch (e: any) {
-      res.status(500).json({ error: e.message || 'recent_failed' });
+      }));
+      
+      res.json(conversations);
+    } catch (error: any) {
+      console.error("[DIAGNOSTICO BFF] ERROR en PostgreSQL:", error.message, error.stack);
+      // IMPORTANTE: Devolver un 500. Si devuelves un 200 con datos vacíos por error, TanStack Query lo cacheará como éxito.
+      res.status(500).json({ error: 'Internal Server Error' });
     }
   });
 

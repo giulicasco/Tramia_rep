@@ -49,10 +49,12 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider defaultTheme="dark" storageKey="tramia-theme">
+      <ThemeProvider defaultTheme="light" storageKey="tramia-theme">
         <TooltipProvider>
-          <Toaster />
-          <Router />
+          <div className="min-h-screen bg-background text-foreground transition-colors">
+            <Toaster />
+            <Router />
+          </div>
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>
