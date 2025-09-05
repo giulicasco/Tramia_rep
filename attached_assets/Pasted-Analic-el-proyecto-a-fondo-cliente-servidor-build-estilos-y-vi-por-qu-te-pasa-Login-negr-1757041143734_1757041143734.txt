@@ -1,0 +1,357 @@
+Analicé el proyecto a fondo (cliente + servidor + build + estilos) y vi por qué te pasa:
+
+Login negro / campos invisibles: tu CSS define dark como valor por defecto en :root y no existe tema light. Además algunos inputs usan colores que quedan “negro sobre negro”.
+
+El toggle no hace nada: el proveedor de tema agrega/quita la clase pero tu CSS no tiene paleta .light; sólo hay :root (oscuro) y .dark (mismo oscuro). Resultado: nunca ves cambio real.
+
+Menú lateral desaparece: el Sidebar exige auth.organization; tu endpoint /auth/me devuelve sólo { email, role }. Entonces el sidebar queda en skeleton (placeholder) y parece “no existe”.
+
+Refresh cada 30–60s: tienes el script de Replit Dev Banner en client/index.html en producción. Ese script puede provocar recargas. Sácalo. El Topbar actualiza la hora cada 30s pero eso no recarga la página (sólo re-render), el refresh total viene del banner o de caídas/restarts.
+
+n8n: el repo aún importa server/n8n.ts y lanza error si no pones N8N_BASE. Como me dijiste que no lo usás, vamos a hacerlo opcional y que las rutas que dependen de n8n devuelvan vacíos.
+
+Abajo te dejo un super-prompt para el AI Agent de Replit con todos los parches: tema, auth/shape, sidebar, overview, quitar datos de prueba, quitar System Health, renombres, recent conversations (3), quick actions, quitar integraciones/prompts del menú, eliminación del dev banner y n8n opcional.
+
+🚀 Super-prompt para el AI Agent de Replit
+
+Objetivo:
+
+Tema dark/light real y persistente.
+
+Login visible.
+
+Sidebar siempre visible (con organización por defecto).
+
+Eliminar recargas “misteriosas”.
+
+No depender de N8N_BASE.
+
+Overview con datos reales y “0” si no hay.
+
+Quitar módulos/labels y ajustar acciones rápidas.
+
+0) Quitar script de recarga de Replit (producción)
+
+Archivo: client/index.html
+Acción: borra esta línea (y no la dejes condicionada):
+
+<!-- REMOVE in prod -->
+<script type="text/javascript" src="https://replit.com/public/js/replit-dev-banner.js"></script>
+
+1) Tema light/dark correcto (variables + toggle)
+
+Archivo: client/src/index.css
+Acción: define light en :root y dark en .dark. Reemplaza el bloque de variables actual por este (idempotente):
+
+:root {
+  /* LIGHT THEME (default) */
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(222 47% 11%);
+
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(222 47% 11%);
+
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(222 47% 11%);
+
+  --primary: hsl(187 95% 43%);
+  --primary-foreground: hsl(210 24% 8%);
+
+  --secondary: hsl(210 40% 96%);
+  --secondary-foreground: hsl(222 47% 11%);
+
+  --muted: hsl(210 40% 96%);
+  --muted-foreground: hsl(215 16% 47%);
+
+  --accent: hsl(210 40% 96%);
+  --accent-foreground: hsl(222 47% 11%);
+
+  --destructive: hsl(0 84% 60%);
+  --destructive-foreground: hsl(210 24% 98%);
+
+  --warning: hsl(35 92% 50%);
+  --warning-foreground: hsl(210 24% 8%);
+
+  --border: hsl(214 32% 91%);
+  --input: hsl(214 32% 91%);
+  --ring: hsl(187 95% 43%);
+
+  /* Sidebar tokens */
+  --sidebar-background: hsl(0 0% 100%);
+  --sidebar-foreground: hsl(222 47% 11%);
+  --sidebar-primary: hsl(187 95% 43%);
+  --sidebar-primary-foreground: hsl(210 24% 8%);
+  --sidebar-accent: hsl(210 40% 96%);
+  --sidebar-accent-foreground: hsl(222 47% 11%);
+  --sidebar-border: hsl(214 32% 91%);
+  --sidebar-ring: hsl(187 95% 43%);
+}
+
+.dark {
+  /* DARK THEME */
+  --background: hsl(210 24% 8%);       /* #0B0F14 */
+  --foreground: hsl(210 17% 97%);
+
+  --card: hsl(215 38% 11%);            /* #111827 */
+  --card-foreground: hsl(210 17% 97%);
+
+  --popover: hsl(215 38% 11%);
+  --popover-foreground: hsl(210 17% 97%);
+
+  --primary: hsl(187 95% 43%);
+  --primary-foreground: hsl(210 24% 8%);
+
+  --secondary: hsl(215 33% 20%);
+  --secondary-foreground: hsl(210 17% 97%);
+
+  --muted: hsl(215 33% 20%);
+  --muted-foreground: hsl(215 14% 56%);
+
+  --accent: hsl(78 76% 58%);
+  --accent-foreground: hsl(210 24% 8%);
+
+  --destructive: hsl(348 90% 60%);
+  --destructive-foreground: hsl(210 17% 97%);
+
+  --warning: hsl(35 92% 50%);
+  --warning-foreground: hsl(210 24% 8%);
+
+  --border: hsl(215 33% 20%);
+  --input: hsl(215 33% 20%);
+  --ring: hsl(187 95% 43%);
+
+  --sidebar-background: hsl(215 38% 11%);
+  --sidebar-foreground: hsl(210 17% 97%);
+  --sidebar-primary: hsl(187 95% 43%);
+  --sidebar-primary-foreground: hsl(210 24% 8%);
+  --sidebar-accent: hsl(215 33% 20%);
+  --sidebar-accent-foreground: hsl(187 95% 43%);
+  --sidebar-border: hsl(215 33% 20%);
+  --sidebar-ring: hsl(187 95% 43%);
+}
+
+/* base */
+@layer base {
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground font-sans antialiased; }
+  .font-mono { font-family: var(--font-mono); }
+}
+
+
+Archivo: client/src/components/theme-provider.tsx
+Acción: asegúrate que sólo agrega/quita la clase dark en <html> y que persiste el tema. Sustituye el componente por este (TS):
+
+import { createContext, useContext, useEffect, useState } from "react";
+
+type Theme = "dark" | "light";
+type Ctx = { theme: Theme; setTheme: (t: Theme) => void; };
+const ThemeCtx = createContext<Ctx | undefined>(undefined);
+
+export function ThemeProvider({ children, defaultTheme = "dark", storageKey = "tramiai-theme" }: {children: React.ReactNode; defaultTheme?: Theme; storageKey?: string;}) {
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem(storageKey) as Theme | null;
+    if (saved === "dark" || saved === "light") return saved;
+    return defaultTheme;
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "dark") root.classList.add("dark");
+    else root.classList.remove("dark");
+    localStorage.setItem(storageKey, theme);
+  }, [theme, storageKey]);
+
+  return <ThemeCtx.Provider value={{ theme, setTheme }}>{children}</ThemeCtx.Provider>;
+}
+
+export function useTheme() {
+  const ctx = useContext(ThemeCtx);
+  if (!ctx) throw new Error("useTheme must be used within ThemeProvider");
+  return ctx;
+}
+
+
+Archivo: client/src/components/topbar.tsx
+Acción: el botón ya llama setTheme(...). Asegura que el label y el ícono reflejen el estado; ejemplo:
+
+{/* dentro del header */}
+<Button variant="ghost" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+  {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+</Button>
+
+
+Archivo: client/src/components/ui/input.tsx
+Acción: mejora contraste en dark: cambia "bg-background" por "bg-card".
+
+className={cn(
+  "flex h-10 w-full rounded-md border border-input bg-card text-foreground ...",
+)}
+
+2) Auth/UI: Sidebar visible siempre (aunque no uses n8n)
+
+Archivo: server/index.ts
+Acción: devuelve forma completa en /auth/me para que el Sidebar tenga user y organization. Reemplaza el handler por:
+
+app.get('/auth/me', requireAuth, (_req, res) => {
+  const u = ( _req as any ).user as { email: string; role: string };
+  res.json({
+    isAuthenticated: true,
+    user: { email: u.email, role: u.role },
+    organization: { id: 'default', name: 'Tramia', slug: 'main' },
+  });
+});
+
+
+Archivo: client/src/lib/api.ts (ya estaba)
+Confirma que authApi.getMe apunta a /auth/me.
+
+Archivo: client/src/lib/auth.ts
+Déjalo como está; con el shape nuevo del servidor, el Sidebar dejará de quedarse en skeleton.
+
+3) Hacer n8n opcional (no lo usas)
+
+Archivo: server/n8n.ts
+Acción: que NO lance error si faltan variables. Reemplaza por:
+
+import fetch from "node-fetch";
+
+const N8N_BASE = process.env.N8N_BASE;
+const INTERNAL_KEY = process.env.INTERNAL_KEY;
+
+export const N8N_ENABLED = Boolean(N8N_BASE && INTERNAL_KEY);
+
+export async function callN8N(path: string, payload?: any, init: RequestInit = {}) {
+  if (!N8N_ENABLED) {
+    throw new Error("n8n_disabled");
+  }
+  const url = `${N8N_BASE}${path}`;
+  const method = init.method || (payload ? "POST" : "GET");
+  const headers = {
+    "content-type": "application/json",
+    "x-internal-key": INTERNAL_KEY!,
+    ...(init.headers || {}),
+  };
+  const res = await fetch(url, { method, headers, body: payload ? JSON.stringify(payload) : undefined });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`n8n ${res.status}: ${text || res.statusText}`);
+  }
+  return res.json();
+}
+
+
+Archivo: server/routes.ts
+Acción: en todas las rutas que usan callN8N, atrapa "n8n_disabled" y responde vacíos (para que el FE no truene). Ejemplo patrón:
+
+// ejemplo en /api/conversations
+app.get("/api/conversations", async (_req, res) => {
+  try {
+    const data = await callN8N(`/webhook/tramia-conversations-list`, undefined, { method: "GET" });
+    res.json(data);
+  } catch (e: any) {
+    if (String(e.message).includes("n8n_disabled")) return res.json([]); // FE opera con vacío
+    res.status(500).json({ message: e.message || "Failed to fetch conversations" });
+  }
+});
+
+
+Archivo: server/index.ts
+Acción: en validateEnvironment(), quita N8N_BASE e INTERNAL_KEY de los requeridos:
+
+const requiredVars = ['DATABASE_URL', 'SESSION_SECRET', 'ADMIN_KEY']; // sin N8N_*
+
+4) Overview 100% real (sin demo), labels y secciones
+
+Ya añadimos endpoints en el server:
+
+/api/metrics/overview (con COALESCE → 0 si no hay datos)
+
+/api/queue/status
+
+/api/activity/recent-conversations (3 últimas)
+
+Archivo: client/src/pages/overview.tsx
+Acción: (ya lo tienes en gran parte) verifica:
+
+La tarjeta se llama “Accepted Invitations” (ya renombrada).
+
+Elimina la sección System Health.
+
+“Recent Conversations” usa GET /api/activity/recent-conversations y muestra máximo 3 con last_message y fecha.
+
+Quick Actions: “Open Chat” enlaza a https://chat.incubadoragrowth.com/app/accounts/1/inbox-view y quita “Test Agents”.
+
+Donde no hay datos, muestra "0" o "No activity yet".
+
+5) Menú lateral y rutas
+
+Archivo: client/src/components/sidebar.tsx
+Acción: quita los items de “Agents & Prompts” e “Integrations” (si quedara alguno).
+
+Archivo: client/src/App.tsx
+Acción: elimina las rutas /agents y /integrations para evitar navegar a páginas que hoy no usás.
+
+6) Datos de testing en “0” o wipe
+
+Ya devolvemos 0 cuando no hay registros.
+
+Si querés vaciar tablas (opcional):
+
+Archivo: server/index.ts (endpoint admin ya incluido en tu repo)
+Llama:
+
+curl -s -X POST "https://client-dashboard-tramia.replit.app/admin/wipe-data" \
+  -H "x-admin-key: <ADMIN_KEY_REAL>"
+
+7) Deploy y validación
+
+Build Vite: asegúrate que el build va a dist/public (ya está en vite.config.ts).
+
+El server sirve dist/public (ya lo hace serveStatic).
+
+Secrets publicados en Deploy (no sólo en workspace):
+
+DATABASE_URL (con sslmode=require)
+
+SESSION_SECRET
+
+ADMIN_KEY
+
+(opcional) N8N_BASE, INTERNAL_KEY → ya no obligatorios
+
+NODE_ENV=production, PORT=3000
+
+Redeploy.
+
+Prueba:
+
+/login → campos visibles en light (por defecto).
+
+Toggle → cambia a dark (fondo oscuro, textos claros).
+
+Sidebar visible con “Tramia / main”.
+
+Overview:
+
+“Accepted Invitations” correcto (0 si vacío).
+
+System Health no está.
+
+Recent Conversations → 3 o “No activity yet”.
+
+Quick Actions → “Open Chat” OK.
+
+La página no se refresca sola (si aún pasa, confirma que quitaste el dev banner del index.html).
+
+Notas extra de calidad
+
+queryClient ya desactiva refetchOnWindowFocus y refetchInterval. Bien.
+
+Puedes añadir un ErrorBoundary global para mostrar un banner si algún /api/* responde 500.
+
+Índices en Neon (si no existen):
+
+CREATE INDEX IF NOT EXISTS idx_jobs_status   ON public.linkedin_jobs_incubadora(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_updated ON public.linkedin_jobs_incubadora(updated_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_nextfu  ON public.linkedin_jobs_incubadora(next_follow_up_at);
+CREATE INDEX IF NOT EXISTS idx_seen_at      ON public.hr_inbound_seen(seen_at);
