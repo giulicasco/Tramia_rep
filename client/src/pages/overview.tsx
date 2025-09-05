@@ -54,8 +54,8 @@ export default function Overview() {
   }
 
   const m: any = metrics || {};
-  const queue: any[] = queueData || [];
-  const conversations: any[] = recentConversations || [];
+  const queue: any[] = Array.isArray(queueData) ? queueData : [];
+  const conversations: any[] = Array.isArray(recentConversations) ? recentConversations : [];
 
   return (
     <div className="p-6 space-y-6 fade-in" data-testid="overview-page">

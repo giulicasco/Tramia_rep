@@ -84,7 +84,17 @@ export function Sidebar() {
     );
   }
 
-  const { user, organization } = auth;
+  const { user, organization } = auth || {};
+
+  if (!user || !organization) {
+    return (
+      <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
+        <div className="p-4">
+          <div className="h-16 bg-muted animate-pulse rounded" />
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col" data-testid="sidebar">
