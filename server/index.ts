@@ -607,29 +607,144 @@ app.use((req, res, next) => {
 
   // Development fallback when Vite fails to load
   if (app.get("env") === "development") {
-    // Add a basic HTML fallback if no other route matched
+    // Serve basic HTML + CSS + JS dashboard
     app.use("*", (_req, res) => {
       res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Tramia Dashboard - Development Mode</title>
+  <title>Tramia Dashboard</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { margin: 0; font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #0B0F14; color: #F8FAFC; }
+    .header { background: #111827; padding: 1rem 2rem; border-bottom: 1px solid #374151; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+    .card { background: #1F2937; border-radius: 12px; padding: 1.5rem; border: 1px solid #374151; }
+    .metric { font-size: 2rem; font-weight: 600; color: #06B6D4; margin: 0; }
+    .label { color: #9CA3AF; margin: 0.5rem 0; }
+    .status { color: #10B981; }
+    .loading { color: #F59E0B; }
+    h1 { margin: 0; color: #F8FAFC; font-size: 1.5rem; }
+    .auth-section { background: #374151; padding: 1rem; border-radius: 8px; margin-bottom: 2rem; }
+    .login-form { display: flex; gap: 0.5rem; align-items: center; }
+    .login-form input { padding: 0.5rem; border: 1px solid #6B7280; background: #1F2937; color: #F8FAFC; border-radius: 6px; }
+    .login-form button { padding: 0.5rem 1rem; background: #06B6D4; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    .login-form button:hover { background: #0891B2; }
+    .authenticated { color: #10B981; }
+  </style>
 </head>
-<body style="font-family: system-ui; padding: 40px; max-width: 600px; margin: 0 auto;">
-  <h1>🔧 Development Server</h1>
-  <p>Tramia Dashboard server is running, but the frontend development server is not available.</p>
-  <h2>API Status</h2>
-  <p>✅ Backend API is working correctly</p>
-  <p>✅ Database connection is established</p>
-  <h2>Available Endpoints</h2>
-  <ul>
-    <li><a href="/healthz">/healthz</a> - Health check</li>
-    <li><a href="/auth/me">/auth/me</a> - Authentication status</li>
-    <li>/api/* - All API routes are available</li>
-  </ul>
-  <p><strong>Note:</strong> This is a development fallback. In production, the frontend should be properly built and served.</p>
+<body>
+  <div class="header">
+    <h1>🚀 Tramia Dashboard</h1>
+  </div>
+  <div class="container">
+    <div class="auth-section">
+      <div id="auth-status">Verificando autenticación...</div>
+      <div id="login-form" style="display: none;">
+        <div class="login-form">
+          <input type="email" id="email" placeholder="Email" value="partners@letsaitomate.com">
+          <input type="password" id="password" placeholder="Password" value="Aitomate2025">
+          <button onclick="login()">Ingresar</button>
+        </div>
+      </div>
+    </div>
+    
+    <div id="dashboard" style="display: none;">
+      <div class="grid">
+        <div class="card">
+          <div class="metric" id="active-leads">--</div>
+          <div class="label">Active Leads</div>
+        </div>
+        <div class="card">
+          <div class="metric" id="accepted-invitations">--</div>
+          <div class="label">Accepted Invitations (24h)</div>
+        </div>
+        <div class="card">
+          <div class="metric" id="qualified-leads">--</div>
+          <div class="label">Qualified Leads (24h)</div>
+        </div>
+        <div class="card">
+          <div class="metric" id="scheduled-calls">--</div>
+          <div class="label">Scheduled Calls (24h)</div>
+        </div>
+      </div>
+      
+      <div class="card">
+        <h3>API Status</h3>
+        <p class="status">✅ Server running on port 5000</p>
+        <p class="status">✅ Database connected</p>
+        <p id="api-status">✅ All API endpoints operational</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let authToken = null;
+
+    async function checkAuth() {
+      try {
+        const response = await fetch('/auth/me');
+        if (response.ok) {
+          const data = await response.json();
+          document.getElementById('auth-status').innerHTML = 
+            '<span class="authenticated">✅ Autenticado como: ' + data.user.email + '</span>';
+          document.getElementById('dashboard').style.display = 'block';
+          loadMetrics();
+          setInterval(loadMetrics, 30000); // Update every 30 seconds
+        } else {
+          document.getElementById('auth-status').innerText = 'No autenticado';
+          document.getElementById('login-form').style.display = 'block';
+        }
+      } catch (e) {
+        document.getElementById('auth-status').innerText = 'Error de conexión';
+        document.getElementById('login-form').style.display = 'block';
+      }
+    }
+
+    async function login() {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      
+      try {
+        const response = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        
+        if (response.ok) {
+          location.reload();
+        } else {
+          alert('Error de autenticación');
+        }
+      } catch (e) {
+        alert('Error de conexión');
+      }
+    }
+
+    async function loadMetrics() {
+      try {
+        const response = await fetch('/api/metrics/overview?range=24h');
+        if (response.ok) {
+          const data = await response.json();
+          document.getElementById('active-leads').innerText = data.snapshot.active_leads;
+          document.getElementById('accepted-invitations').innerText = data.window.accepted_invitations;
+          document.getElementById('qualified-leads').innerText = data.window.qualified;
+          document.getElementById('scheduled-calls').innerText = data.window.scheduled;
+          document.getElementById('api-status').innerHTML = '✅ Datos actualizados: ' + new Date().toLocaleTimeString();
+        } else {
+          document.getElementById('api-status').innerHTML = '⚠️ Error cargando métricas';
+        }
+      } catch (e) {
+        document.getElementById('api-status').innerHTML = '❌ Error de conexión';
+      }
+    }
+
+    // Initialize
+    checkAuth();
+  </script>
 </body>
 </html>
       `);
