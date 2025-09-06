@@ -1,0 +1,383 @@
+Contexto (ya hecho): la base en Neon tiene columnas nuevas qualified_at, scheduled_at, first_lead_message_at, first_ai_message_at + índices. El backend es Express (BFF) con /auth/me y /api/* protegidos. No dependemos de N8N_BASE para estas vistas.
+
+0) Dependencias y build
+
+Instalar animaciones para el FE:
+
+npm i framer-motion
+
+
+Asegurar Tailwind darkMode: 'class' en tailwind.config.* (ya debería estar).
+
+1) Servidor (Express) — Endpoints Plan Pro + listas reales
+
+Archivo: server/index.ts
+Acción: agrega/actualiza estos endpoints y helpers (si ya existen, reemplazar por estas versiones).
+
+1.1 Helpers de rango
+function parseRange(q: Record<string, any>) {
+  const now = new Date();
+  let from: Date | null = null, to: Date | null = null;
+  if (q.from && q.to) {
+    const f = new Date(String(q.from)), t = new Date(String(q.to));
+    if (!isNaN(+f) && !isNaN(+t) && f < t) { from = f; to = t; }
+  }
+  if (!from || !to) {
+    const r = String(q.range || '24h');
+    const map: Record<string, number> = { '24h': 24, '7d': 24*7, '30d': 24*30 };
+    const hours = map[r] ?? 24;
+    to = now; from = new Date(now.getTime() - hours * 60 * 60 * 1000);
+  }
+  return { from, to };
+}
+function rangeLabel(q: Record<string, any>) {
+  if (q.from && q.to) return 'Custom';
+  return ({ '24h': 'Last 24h', '7d': 'Last 7 days', '30d': 'Last 30 days' } as any)[q.range] || 'Last 24h';
+}
+
+1.2 Overview con Plan Pro (window + snapshot)
+app.get('/api/metrics/overview', requireAuth, async (req, res) => {
+  const { from, to } = parseRange(req.query);
+  try {
+    const winSql = `
+    WITH
+    accepted AS (
+      SELECT count(*) AS c
+      FROM public.hr_inbound_seen
+      WHERE seen_at >= $1 AND seen_at < $2
+    ),
+    qualified AS (
+      SELECT count(*) AS c
+      FROM public.linkedin_jobs_incubadora
+      WHERE qualified_at >= $1 AND qualified_at < $2
+    ),
+    scheduled AS (
+      SELECT count(*) AS c
+      FROM public.linkedin_jobs_incubadora
+      WHERE scheduled_at >= $1 AND scheduled_at < $2
+    ),
+    ttfr AS (
+      SELECT avg(extract(epoch from (
+        COALESCE(first_ai_message_at, last_human_message_at)
+        - COALESCE(first_lead_message_at, last_lead_message_at)
+      ))) AS seconds
+      FROM public.linkedin_jobs_incubadora
+      WHERE COALESCE(first_lead_message_at, last_lead_message_at) >= $1
+        AND COALESCE(first_lead_message_at, last_lead_message_at) <  $2
+        AND (COALESCE(first_ai_message_at, last_human_message_at) IS NOT NULL)
+    )
+    SELECT
+      COALESCE((SELECT c FROM accepted),0)   AS accepted_invitations,
+      COALESCE((SELECT c FROM qualified),0)  AS qualified,
+      COALESCE((SELECT c FROM scheduled),0)  AS scheduled,
+      COALESCE((SELECT seconds FROM ttfr),0) AS ttfr_seconds;
+    `;
+    const win = await pool.query(winSql, [from, to]);
+
+    const snapSql = `
+    WITH
+    active_leads AS (
+      SELECT count(DISTINCT user_id) AS c
+      FROM public.linkedin_jobs_incubadora
+      WHERE status IN ('pending','processing','wait')
+        AND (chatwoot_mode = 'ai-on' OR chatwoot_mode IS NULL)
+    ),
+    queue AS (
+      SELECT
+        sum((status='pending')::int) AS pending,
+        sum((status='processing')::int) AS processing
+      FROM public.linkedin_jobs_incubadora
+    ),
+    ai_status AS (
+      SELECT
+        sum((chatwoot_mode='ai-on')::int) AS ai_on,
+        count(*) AS total
+      FROM public.linkedin_jobs_incubadora
+    )
+    SELECT
+      COALESCE((SELECT c FROM active_leads),0)   AS active_leads,
+      COALESCE((SELECT pending FROM queue),0)    AS queue_pending,
+      COALESCE((SELECT processing FROM queue),0) AS queue_processing,
+      COALESCE((SELECT ai_on FROM ai_status),0)  AS ai_on,
+      COALESCE((SELECT total FROM ai_status),0)  AS ai_total;
+    `;
+    const snap = await pool.query(snapSql);
+
+    res.json({ range: { from, to, label: rangeLabel(req.query) }, window: win.rows[0], snapshot: snap.rows[0] });
+  } catch (e:any) { res.status(500).json({ error: e.message || 'metrics_failed' }); }
+});
+
+1.3 Recent inbound messages (últimas 3 respuestas del lead, en rango)
+app.get('/api/activity/recent-inbound', requireAuth, async (req, res) => {
+  const { from, to } = parseRange(req.query);
+  try {
+    const sql = `
+    WITH base AS (
+      SELECT j.id AS job_id, j.chatwoot_conversation_id, j.last_lead_message_at
+      FROM public.linkedin_jobs_incubadora j
+      WHERE j.chatwoot_conversation_id IS NOT NULL
+        AND j.last_lead_message_at IS NOT NULL
+        AND j.last_lead_message_at >= $1 AND j.last_lead_message_at < $2
+      ORDER BY j.last_lead_message_at DESC
+    )
+    SELECT DISTINCT ON (b.chatwoot_conversation_id)
+      b.chatwoot_conversation_id,
+      b.job_id,
+      b.last_lead_message_at AS at,
+      (
+        SELECT m.message
+        FROM public.linkedin_jobs_memory_incubadora m
+        WHERE m.session_id::text = b.chatwoot_conversation_id::text
+          AND m.created_at <= b.last_lead_message_at
+        ORDER BY m.created_at DESC
+        LIMIT 1
+      ) AS last_inbound
+    FROM base b
+    ORDER BY b.chatwoot_conversation_id, b.last_lead_message_at DESC
+    LIMIT 3;
+    `;
+    const { rows } = await pool.query(sql, [from, to]);
+    res.json(rows.map(r => ({
+      conversation_id: r.chatwoot_conversation_id,
+      job_id: r.job_id,
+      last_message: r.last_inbound || 'No message',
+      at: r.at
+    })));
+  } catch (e:any) { res.status(500).json({ error: e.message || 'recent_inbound_failed' }); }
+});
+
+1.4 Conversations list (para la página Conversations)
+app.get('/api/conversations/list', requireAuth, async (req, res) => {
+  const { from, to } = parseRange(req.query); // usamos updated_at para el rango por defecto
+  try {
+    const sql = `
+    SELECT
+      j.id AS job_id,
+      j.chatwoot_conversation_id,
+      j.user_id,
+      j.status,
+      j.agent_type,
+      j.updated_at,
+      j.last_lead_message_at,
+      (
+        SELECT m.message
+        FROM public.linkedin_jobs_memory_incubadora m
+        WHERE m.session_id::text = j.chatwoot_conversation_id::text
+        ORDER BY m.created_at DESC
+        LIMIT 1
+      ) AS last_message
+    FROM public.linkedin_jobs_incubadora j
+    WHERE j.chatwoot_conversation_id IS NOT NULL
+      AND j.updated_at >= $1 AND j.updated_at < $2
+    ORDER BY j.updated_at DESC
+    LIMIT 100;
+    `;
+    const { rows } = await pool.query(sql, [from, to]);
+    res.json(rows);
+  } catch (e:any) { res.status(500).json({ error: e.message || 'conversations_failed' }); }
+});
+
+1.5 Running jobs (Job Queue “near-real-time”)
+app.get('/api/queue/running', requireAuth, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT id, chatwoot_conversation_id, sender_account_id, agent_type,
+             status, processing_started_at, priority, updated_at
+      FROM public.linkedin_jobs_incubadora
+      WHERE status = 'processing'
+      ORDER BY processing_started_at DESC NULLS LAST
+      LIMIT 100;
+    `);
+    res.json(rows);
+  } catch (e:any) { res.status(500).json({ error: e.message || 'queue_running_failed' }); }
+});
+
+
+Nota: no usamos N8N_BASE en nada de esto.
+
+2) Frontend — Tema, Overview, Recent, Conversations, Queue
+2.1 Tema dark/light que sí cambia
+
+Archivo: client/src/index.css
+Acción: asegura variables completas de light en :root y dark en .dark (como ya te indiqué).
+
+Archivo: client/src/components/theme-provider.tsx
+Acción: usa este provider (si ya existe, reemplázalo; persiste en localStorage y aplica clase dark en <html>):
+
+import { createContext, useContext, useEffect, useState } from "react";
+type Theme = "dark" | "light";
+type Ctx = { theme: Theme; setTheme: (t: Theme) => void; };
+const ThemeCtx = createContext<Ctx | undefined>(undefined);
+
+export function ThemeProvider({ children, defaultTheme = "light", storageKey = "tramiai-theme" }:{
+  children: React.ReactNode; defaultTheme?: Theme; storageKey?: string;
+}) {
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem(storageKey) as Theme | null;
+    if (saved === "dark" || saved === "light") return saved;
+    return defaultTheme;
+  });
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove('dark');
+    if (theme === "dark") root.classList.add("dark");
+    localStorage.setItem(storageKey, theme);
+  }, [theme, storageKey]);
+  return <ThemeCtx.Provider value={{ theme, setTheme }}>{children}</ThemeCtx.Provider>;
+}
+export function useTheme(){ const c=useContext(ThemeCtx); if(!c) throw new Error("useTheme inside ThemeProvider"); return c; }
+
+
+Archivo: client/src/components/topbar.tsx
+Acción: botón de toggle que cambia y refleja estado:
+
+import { useTheme } from "@/components/theme-provider";
+import { Moon, Sun } from "lucide-react";
+...
+const { theme, setTheme } = useTheme();
+<Button variant="ghost" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+  {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+</Button>
+
+
+Quitar el botón de soporte “?” en el mismo topbar.tsx (elimina el ícono/componente correspondiente).
+
+Inputs (contraste en dark):
+
+client/src/components/ui/input.tsx: usa bg-card text-foreground border-input en lugar de bg-background si se ve apagado en dark.
+
+2.2 Overview — filtros y datos reales (sin reload)
+
+Archivo: client/src/pages/overview.tsx
+Acción: usa range selector y llama:
+
+GET /api/metrics/overview?{range|from,to}
+
+GET /api/activity/recent-inbound?{range|from,to}
+
+Etiquetas claras:
+
+Accepted Invitations (in range) → window.accepted_invitations
+
+Qualified (in range) → window.qualified
+
+Scheduled (in range) → window.scheduled
+
+TTFR (in range) → (window.ttfr_seconds/60).toFixed(1)+'m'
+
+Active Leads (now) / AI Status (now) / Queue Pending/Processing (now) → snapshot.*
+
+Recent Messages:
+
+Renderiza la lista de 3 últimas desde /api/activity/recent-inbound (muestra last_message + fecha at + conversation_id).
+
+Quick Actions:
+
+“Open Chat” → https://chat.incubadoragrowth.com/app/accounts/1/inbox-view
+
+Quitar “Test agents”.
+
+2.3 Conversations — que aparezcan de Neon (no “no conversations found”)
+
+Archivo: client/src/pages/conversations.tsx (o el que corresponda)
+
+Reemplazar el fetch por:
+
+fetch(`/api/conversations/list?range=24h`, { credentials:'include' })
+
+
+Renderizar cada item: conversation_id, last_message (si existe), status, agent_type, updated_at.
+
+Si querés filtro de rango aquí también, reutiliza el selector (igual que en Overview).
+
+2.4 Job Queue — near-real-time sin recargar página + animaciones
+
+Archivo: client/src/pages/job-queue.tsx (o similar)
+
+Usa React Query o useEffect con setInterval solo para fetch, nunca window.location.reload.
+
+const { data: running = [] } = useQuery({
+  queryKey: ['queue-running'],
+  queryFn: () => fetch('/api/queue/running',{credentials:'include'}).then(r=>r.json()),
+  refetchInterval: 4000, // 4s
+  refetchOnWindowFocus: false,
+});
+
+
+Para contadores suaves, agrega un hook simple:
+
+Archivo: client/src/hooks/useAnimatedNumber.ts
+
+import { useEffect, useRef, useState } from "react";
+export function useAnimatedNumber(value: number, duration = 400) {
+  const [display, setDisplay] = useState(value);
+  const refFrom = useRef(value);
+  useEffect(() => {
+    const start = performance.now();
+    const from = refFrom.current;
+    const diff = value - from;
+    let raf = 0;
+    const step = (t:number) => {
+      const p = Math.min((t - start) / duration, 1);
+      setDisplay(from + diff * p);
+      if (p < 1) raf = requestAnimationFrame(step);
+      else refFrom.current = value;
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value, duration]);
+  return Math.round(display);
+}
+
+
+Y úsalo para pending, processing (o cualquier KPI que suba/baje) para mostrar números “contando”.
+
+Para listas que entran/salen, usa framer-motion:
+
+import { AnimatePresence, motion } from "framer-motion";
+<AnimatePresence>
+  {running.map(item => (
+    <motion.div key={item.id}
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      transition={{ duration: 0.2 }}
+      className="rounded-xl border bg-card p-3"
+    >
+      <div className="text-sm text-zinc-500">#{item.id} · {item.agent_type}</div>
+      <div className="text-xs text-zinc-400">{new Date(item.processing_started_at || item.updated_at).toLocaleString()}</div>
+    </motion.div>
+  ))}
+</AnimatePresence>
+
+3) Limpiezas y detalles
+
+Remover cualquier script que pueda refrescar la página (dev banner de Replit u otros). En client/index.html no debe haber replit-dev-banner.js.
+
+Sidebar: asegurarse que no dependa de organization ausente. En /auth/me ya devolvemos { organization: {id:'default', name:'Tramia'} }. Mantener eso.
+
+Soporte “?”: borrar definitivamente el ícono/componente del topbar.
+
+Zero states: si endpoints devuelven vacío, mostrar “0” / “No messages yet.” en vez de “no conversations found” cuando sí hay data.
+
+Todos los fetch del FE con credentials:'include'.
+
+4) QA (post-deploy)
+
+Login: visible en light y dark; toggle cambia y persiste.
+
+Overview:
+
+Selector de rango (24h/7d/30d/custom) actualiza KPIs (in range) y deja snapshot (now).
+
+Recent Messages muestra 3 últimos inbound (del lead) con texto y hora.
+
+Conversations: aparecen filas reales (sin depender de n8n).
+
+Job Queue:
+
+Lista de status='processing' actualiza cada 4s sin recargar la página.
+
+Contadores y tarjetas animan cambios suavemente.
+
+Sin botón de support “?”.
