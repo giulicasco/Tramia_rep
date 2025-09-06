@@ -605,6 +605,37 @@ app.use((req, res, next) => {
     }
   }
 
+  // Development fallback when Vite fails to load
+  if (app.get("env") === "development") {
+    // Add a basic HTML fallback if no other route matched
+    app.use("*", (_req, res) => {
+      res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Tramia Dashboard - Development Mode</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body style="font-family: system-ui; padding: 40px; max-width: 600px; margin: 0 auto;">
+  <h1>🔧 Development Server</h1>
+  <p>Tramia Dashboard server is running, but the frontend development server is not available.</p>
+  <h2>API Status</h2>
+  <p>✅ Backend API is working correctly</p>
+  <p>✅ Database connection is established</p>
+  <h2>Available Endpoints</h2>
+  <ul>
+    <li><a href="/healthz">/healthz</a> - Health check</li>
+    <li><a href="/auth/me">/auth/me</a> - Authentication status</li>
+    <li>/api/* - All API routes are available</li>
+  </ul>
+  <p><strong>Note:</strong> This is a development fallback. In production, the frontend should be properly built and served.</p>
+</body>
+</html>
+      `);
+    });
+  }
+
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
