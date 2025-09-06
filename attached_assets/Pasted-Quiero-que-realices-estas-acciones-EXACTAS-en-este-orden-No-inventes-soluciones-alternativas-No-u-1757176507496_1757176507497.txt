@@ -1,0 +1,403 @@
+Quiero que realices estas acciones EXACTAS, en este orden. No inventes soluciones alternativas. No uses bun, ni transpiles .tsx “on-the-fly”. Todo debe compilarse en build y ejecutarse con Node sobre JS compilado.
+
+0) Limpieza total de hacks previos
+
+Elimina cualquier wrapper/archivo creado en node_modules/.bin/tsx:
+
+rm -f node_modules/.bin/tsx
+
+
+Revierte/elimina cualquier fallback HTML o transpile on-the-fly agregado en server/index.ts. No debe haber código que sirva /src/*.tsx directamente ni “bun build”.
+
+Elimina client/built.html o similares si existen:
+
+rm -rf client/dist client/built.html
+
+1) Dependencias y scripts
+
+Instala o asegura estas dependencias:
+
+# Backend + DB
+npm i express helmet cors cookie-parser jsonwebtoken express-rate-limit pg dotenv
+
+# Frontend + build
+npm i react react-dom @tanstack/react-query framer-motion
+npm i -D typescript vite @vitejs/plugin-react @types/node @types/express concurrently rimraf
+
+# Tailwind toolchain (si no está)
+npm i -D tailwindcss postcss autoprefixer
+
+
+Edita package.json para dejar estos scripts (respeta exactamente los nombres):
+
+{
+  "scripts": {
+    "dev": "concurrently -k \"node server/dev.cjs\" \"vite\"",
+    "build": "rimraf dist && npm run build:server && npm run build:client",
+    "build:server": "tsc -p server/tsconfig.json",
+    "build:client": "vite build",
+    "start": "NODE_ENV=production node dist/server/index.js"
+  }
+}
+
+
+Si no puedes editar package.json directamente, créalo/reescríbelo con el contenido actual + estos scripts.
+NO agregues “type”: “module”. Lo evitamos para no chocar con CJS.
+
+2) Configuración de compilación
+2.1 server/tsconfig.json
+
+Crea/reescribe con CommonJS (clave para evitar el caos ESM/tsx):
+
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "../dist/server",
+    "rootDir": "./",
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"]
+}
+
+2.2 vite.config.ts (en la raíz)
+
+Debe apuntar a client/ y emitir a dist/public:
+
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  root: 'client',
+  build: { outDir: '../dist/public', emptyOutDir: true },
+  server: { port: 5173 }
+})
+
+3) Servidor Express limpio (CJS compilado)
+
+Reemplaza POR COMPLETO server/index.ts con este contenido (ES imports está bien; TypeScript lo transpila a CJS):
+
+import 'dotenv/config'
+import express from 'express'
+import helmet from 'helmet'
+import cors from 'cors'
+import cookieParser from 'cookie-parser'
+import rateLimit from 'express-rate-limit'
+import { Pool } from 'pg'
+import path from 'path'
+
+const app = express()
+const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+
+// Middlewares base
+app.use(helmet())
+app.use(cors({ origin: true, credentials: true }))
+app.use(express.json({ limit: '1mb' }))
+app.use(cookieParser())
+
+// Auth mínima (ajusta a tu JWT si corresponde)
+function requireAuth(req: any, res: any, next: any) {
+  if (!req.cookies?.sid) return res.status(401).json({ error: 'unauthorized' })
+  req.user = { email: 'partners@letsiatomate.com', role: 'admin' }
+  next()
+}
+
+// Utilidad rango
+function parseRange(q: Record<string, any>) {
+  const now = new Date()
+  let from: Date | null = null, to: Date | null = null
+  if (q.from && q.to) {
+    const f = new Date(String(q.from)), t = new Date(String(q.to))
+    if (!isNaN(+f) && !isNaN(+t) && f < t) { from = f; to = t }
+  }
+  if (!from || !to) {
+    const r = String(q.range || '24h')
+    const map: Record<string, number> = { '24h': 24, '7d': 24*7, '30d': 24*30 }
+    const hours = map[r] ?? 24
+    to = now; from = new Date(now.getTime() - hours*60*60*1000)
+  }
+  return { from, to }
+}
+function rangeLabel(q: Record<string, any>) {
+  if (q.from && q.to) return 'Custom'
+  return ({ '24h':'Last 24h','7d':'Last 7 days','30d':'Last 30 days' } as any)[q.range] || 'Last 24h'
+}
+
+// Health
+app.get('/healthz', async (_req, res) => {
+  try { await pool.query('select 1'); res.json({ ok: true }) }
+  catch (e: any) { res.status(500).json({ ok:false, error: e.message }) }
+})
+
+// Auth state
+app.get('/auth/me', requireAuth, (req: any, res) => {
+  res.json({
+    isAuthenticated: true,
+    user: { email: req.user.email, role: req.user.role },
+    organization: { id: 'default', name: 'Tramia', slug: 'main' }
+  })
+})
+
+// API protegida
+app.use('/api', requireAuth)
+
+// Overview (Plan Pro)
+app.get('/api/metrics/overview', async (req, res) => {
+  const { from, to } = parseRange(req.query)
+  try {
+    const winSql = `
+    WITH
+    accepted AS (
+      SELECT count(*) AS c FROM public.hr_inbound_seen
+      WHERE seen_at >= $1 AND seen_at < $2
+    ),
+    qualified AS (
+      SELECT count(*) AS c FROM public.linkedin_jobs_incubadora
+      WHERE qualified_at >= $1 AND qualified_at < $2
+    ),
+    scheduled AS (
+      SELECT count(*) AS c FROM public.linkedin_jobs_incubadora
+      WHERE scheduled_at >= $1 AND scheduled_at < $2
+    ),
+    ttfr AS (
+      SELECT avg(extract(epoch from (
+        COALESCE(first_ai_message_at, last_human_message_at)
+        - COALESCE(first_lead_message_at, last_lead_message_at)
+      ))) AS seconds
+      FROM public.linkedin_jobs_incubadora
+      WHERE COALESCE(first_lead_message_at, last_lead_message_at) >= $1
+        AND COALESCE(first_lead_message_at, last_lead_message_at) <  $2
+        AND (COALESCE(first_ai_message_at, last_human_message_at) IS NOT NULL)
+    )
+    SELECT
+      COALESCE((SELECT c FROM accepted),0)   AS accepted_invitations,
+      COALESCE((SELECT c FROM qualified),0)  AS qualified,
+      COALESCE((SELECT c FROM scheduled),0)  AS scheduled,
+      COALESCE((SELECT seconds FROM ttfr),0) AS ttfr_seconds;
+    `
+    const win = await pool.query(winSql, [from, to])
+
+    const snapSql = `
+    WITH
+    active_leads AS (
+      SELECT count(DISTINCT user_id) AS c
+      FROM public.linkedin_jobs_incubadora
+      WHERE status IN ('pending','processing','wait')
+        AND (chatwoot_mode = 'ai-on' OR chatwoot_mode IS NULL)
+    ),
+    queue AS (
+      SELECT
+        sum((status='pending')::int) AS pending,
+        sum((status='processing')::int) AS processing
+      FROM public.linkedin_jobs_incubadora
+    ),
+    ai_status AS (
+      SELECT
+        sum((chatwoot_mode='ai-on')::int) AS ai_on,
+        count(*) AS total
+      FROM public.linkedin_jobs_incubadora
+    )
+    SELECT
+      COALESCE((SELECT c FROM active_leads),0)   AS active_leads,
+      COALESCE((SELECT pending FROM queue),0)    AS queue_pending,
+      COALESCE((SELECT processing FROM queue),0) AS queue_processing,
+      COALESCE((SELECT ai_on FROM ai_status),0)  AS ai_on,
+      COALESCE((SELECT total FROM ai_status),0)  AS ai_total;
+    `
+    const snap = await pool.query(snapSql)
+
+    res.json({ range: { from, to, label: rangeLabel(req.query) }, window: win.rows[0], snapshot: snap.rows[0] })
+  } catch (e: any) { res.status(500).json({ error: e.message || 'metrics_failed' }) }
+})
+
+// Recent inbound (últimos 3 mensajes del lead, en rango)
+app.get('/api/activity/recent-inbound', async (req, res) => {
+  const { from, to } = parseRange(req.query)
+  try {
+    const sql = `
+    WITH base AS (
+      SELECT j.id AS job_id, j.chatwoot_conversation_id, j.last_lead_message_at
+      FROM public.linkedin_jobs_incubadora j
+      WHERE j.chatwoot_conversation_id IS NOT NULL
+        AND j.last_lead_message_at IS NOT NULL
+        AND j.last_lead_message_at >= $1 AND j.last_lead_message_at < $2
+      ORDER BY j.last_lead_message_at DESC
+    )
+    SELECT DISTINCT ON (b.chatwoot_conversation_id)
+      b.chatwoot_conversation_id,
+      b.job_id,
+      b.last_lead_message_at AS at,
+      (
+        SELECT m.message
+        FROM public.linkedin_jobs_memory_incubadora m
+        WHERE m.session_id::text = b.chatwoot_conversation_id::text
+          AND m.created_at <= b.last_lead_message_at
+        ORDER BY m.created_at DESC
+        LIMIT 1
+      ) AS last_inbound
+    FROM base b
+    ORDER BY b.chatwoot_conversation_id, b.last_lead_message_at DESC
+    LIMIT 3;
+    `
+    const { rows } = await pool.query(sql, [from, to])
+    res.json(rows.map(r => ({
+      conversation_id: r.chatwoot_conversation_id,
+      job_id: r.job_id,
+      last_message: r.last_inbound || 'No message',
+      at: r.at
+    })))
+  } catch (e: any) { res.status(500).json({ error: e.message || 'recent_inbound_failed' }) }
+})
+
+// Conversations list (en rango por updated_at)
+app.get('/api/conversations/list', async (req, res) => {
+  const { from, to } = parseRange(req.query)
+  try {
+    const sql = `
+    SELECT
+      j.id AS job_id,
+      j.chatwoot_conversation_id,
+      j.user_id,
+      j.status,
+      j.agent_type,
+      j.updated_at,
+      j.last_lead_message_at,
+      (
+        SELECT m.message
+        FROM public.linkedin_jobs_memory_incubadora m
+        WHERE m.session_id::text = j.chatwoot_conversation_id::text
+        ORDER BY m.created_at DESC
+        LIMIT 1
+      ) AS last_message
+    FROM public.linkedin_jobs_incubadora j
+    WHERE j.chatwoot_conversation_id IS NOT NULL
+      AND j.updated_at >= $1 AND j.updated_at < $2
+    ORDER BY j.updated_at DESC
+    LIMIT 100;
+    `
+    const { rows } = await pool.query(sql, [from, to])
+    res.json(rows)
+  } catch (e: any) { res.status(500).json({ error: e.message || 'conversations_failed' }) }
+})
+
+// Running jobs (near-real-time)
+app.get('/api/queue/running', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT id, chatwoot_conversation_id, sender_account_id, agent_type,
+             status, processing_started_at, priority, updated_at
+      FROM public.linkedin_jobs_incubadora
+      WHERE status = 'processing'
+      ORDER BY processing_started_at DESC NULLS LAST
+      LIMIT 100;
+    `)
+    res.json(rows)
+  } catch (e: any) { res.status(500).json({ error: e.message || 'queue_running_failed' }) }
+})
+
+// PRODUCCIÓN: servir build estático
+if (process.env.NODE_ENV === 'production') {
+  const staticDir = path.resolve(process.cwd(), 'dist/public')
+  app.use(express.static(staticDir))
+  app.get('*', (_req, res) => res.sendFile(path.join(staticDir, 'index.html')))
+}
+
+const port = Number(process.env.PORT || 5000)
+app.listen(port, () => console.log(`BFF listening on :${port}`))
+
+
+No importes ./vite ni middleware de Vite en runtime. En deploy siempre sirvamos estático de dist/public.
+
+4) Frontend: dark/light + UI fixes mínimos
+4.1 Tema (index.css)
+
+En client/src/index.css define light en :root y dark en .dark (variables completas). Si faltan, usa el set que ya te compartí antes. Asegúrate que los inputs usen bg-card text-foreground border-input.
+
+4.2 Theme Provider (client/src/components/theme-provider.tsx)
+
+Usa este provider (agrega/quita .dark en <html> y persiste en localStorage):
+
+import { createContext, useContext, useEffect, useState } from "react";
+type Theme = "dark" | "light";
+type Ctx = { theme: Theme; setTheme: (t: Theme) => void; };
+const ThemeCtx = createContext<Ctx | undefined>(undefined);
+
+export function ThemeProvider({ children, defaultTheme = "light", storageKey = "tramiai-theme" }:{
+  children: React.ReactNode; defaultTheme?: Theme; storageKey?: string;
+}) {
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem(storageKey) as Theme | null;
+    if (saved === "dark" || saved === "light") return saved;
+    return defaultTheme;
+  });
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove('dark');
+    if (theme === "dark") root.classList.add("dark");
+    localStorage.setItem(storageKey, theme);
+  }, [theme, storageKey]);
+  return <ThemeCtx.Provider value={{ theme, setTheme }}>{children}</ThemeCtx.Provider>;
+}
+export function useTheme(){ const c=useContext(ThemeCtx); if(!c) throw new Error("useTheme inside ThemeProvider"); return c; }
+
+4.3 Topbar: toggle funcional y quitar soporte “?”
+
+En client/src/components/topbar.tsx:
+
+Botón toggle:
+
+import { useTheme } from "@/components/theme-provider";
+import { Moon, Sun } from "lucide-react";
+// ...
+const { theme, setTheme } = useTheme();
+// ...
+<Button variant="ghost" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+  {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+</Button>
+
+
+Elimina el ícono/botón de support “?”.
+
+4.4 Overview
+
+Selector de rango (24h/7d/30d/custom) y fetch a:
+
+/api/metrics/overview?...
+
+/api/activity/recent-inbound?...
+
+Renombra tarjeta a “Accepted Invitations (in range)”.
+
+Quita System Health.
+
+Quick Actions → “Open Chat” → https://chat.incubadoragrowth.com/app/accounts/1/inbox-view. Quita “Test agents”.
+
+4.5 Conversations
+
+En la página de conversaciones, usa:
+
+fetch('/api/conversations/list?range=7d', { credentials:'include' })
+
+
+Renderiza conversation_id, last_message, status, agent_type, updated_at.
+Si sale “no conversations found”, es porque no hay data en esa ventana; probá 30d o custom.
+
+4.6 Job Queue near-real-time (sin full reload)
+
+Usa React Query con refetchInterval: 4000 para:
+
+/api/queue/running
+
+(opcional) refrescar snapshot de /api/metrics/overview
+
+Para contadores, agrega un useAnimatedNumber(value) (interpolación ~400ms).
+
+Para filas, usa framer-motion con <AnimatePresence>.
+
+(Si faltan estos pequeños helpers, crea client/src/hooks/useAnimatedNumber.ts como te pasé antes.)
