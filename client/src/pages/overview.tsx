@@ -1,6 +1,4 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { motion } from "framer-motion";
 import { 
   UserPlus, 
   MessageSquare, 
@@ -17,18 +15,14 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
-import { useAnimatedNumber } from "@/hooks/useAnimatedNumber";
 
 export default function Overview() {
-  const [range, setRange] = useState("24h");
-  
-  // Fetch metrics data with range
+  // Fetch metrics data
   const { data: metrics, isLoading: metricsLoading } = useQuery({
-    queryKey: ["/api/metrics/overview", range],
-    queryFn: () => api("GET", `/api/metrics/overview?range=${range}`),
-    refetchInterval: 15000, // Refresh every 15 seconds
+    queryKey: ["/api/metrics/overview"],
+    queryFn: () => api("GET", "/api/metrics/overview"),
+    refetchInterval: 30000, // Refresh every 30 seconds
   });
 
   // Fetch queue status
@@ -59,79 +53,38 @@ export default function Overview() {
     );
   }
 
-  // Plan Pro metrics structure with fallbacks
-  const win = (metrics as any)?.window || {};
-  const snap = (metrics as any)?.snapshot || {};
-  const rangeInfo = (metrics as any)?.range || { label: "Last 24h" };
-  
-  // Animated values
-  const acceptedAnim = useAnimatedNumber(win.accepted_invitations || 0);
-  const activeLeadsAnim = useAnimatedNumber(snap.active_leads || 0);
-  const qualifiedAnim = useAnimatedNumber(win.qualified || 0);
-  const scheduledAnim = useAnimatedNumber(win.scheduled || 0);
-  
+  const m: any = metrics || {};
   const queue: any[] = Array.isArray(queueData) ? queueData : [];
   const conversations: any[] = Array.isArray(recentConversations) ? recentConversations : [];
 
   return (
     <div className="p-6 space-y-6 fade-in" data-testid="overview-page">
-      {/* Range Selector */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-foreground">Overview Dashboard</h2>
-          <p className="text-sm text-muted-foreground">Real-time metrics • {rangeInfo.label}</p>
-        </div>
-        <Select value={range} onValueChange={setRange}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="24h">Last 24h</SelectItem>
-            <SelectItem value="7d">Last 7 days</SelectItem>
-            <SelectItem value="30d">Last 30 days</SelectItem>
-          </SelectContent>
-        </Select>
+      {/* KPI Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <KpiCard
+          title="Accepted Invitations"
+          value={m.hr_accepted_24h || 0}
+          icon={<UserPlus className="h-5 w-5" />}
+        />
+        
+        <KpiCard
+          title="Active Leads"
+          value={m.active_leads || 0}
+          icon={<MessageSquare className="h-5 w-5" />}
+        />
+        
+        <KpiCard
+          title="Qualified (24h)"
+          value={m.qualified_24h || 0}
+          icon={<CheckCircle className="h-5 w-5" />}
+        />
+        
+        <KpiCard
+          title="Scheduled (24h)"
+          value={m.scheduled_24h || 0}
+          icon={<CalendarCheck className="h-5 w-5" />}
+        />
       </div>
-      
-      {/* KPI Cards Grid with Animations */}
-      <motion.div 
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, staggerChildren: 0.1 }}
-      >
-        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
-          <KpiCard
-            title="Accepted Invitations"
-            value={acceptedAnim}
-            icon={<UserPlus className="h-5 w-5" />}
-          />
-        </motion.div>
-        
-        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
-          <KpiCard
-            title="Active Leads"
-            value={activeLeadsAnim}
-            icon={<MessageSquare className="h-5 w-5" />}
-          />
-        </motion.div>
-        
-        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
-          <KpiCard
-            title="Qualified"
-            value={qualifiedAnim}
-            icon={<CheckCircle className="h-5 w-5" />}
-          />
-        </motion.div>
-        
-        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
-          <KpiCard
-            title="Scheduled"
-            value={scheduledAnim}
-            icon={<CalendarCheck className="h-5 w-5" />}
-          />
-        </motion.div>
-      </motion.div>
 
       {/* Performance Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -145,7 +98,7 @@ export default function Overview() {
             </div>
             <div className="space-y-2">
               <div className="text-2xl font-bold text-foreground font-mono">
-                {win.ttfr_seconds ? (win.ttfr_seconds / 60).toFixed(1) + 'm' : '0m'}
+                {m.ttfr_seconds ? (m.ttfr_seconds / 60).toFixed(1) + 'm' : '0m'}
               </div>
               <div className="text-xs text-muted-foreground">Time to First Response</div>
             </div>
@@ -162,10 +115,10 @@ export default function Overview() {
             </div>
             <div className="space-y-2">
               <div className="text-2xl font-bold text-foreground">
-                {snap.ai_total > 0 ? Math.round((snap.ai_on / snap.ai_total) * 100) + '%' : '0%'}
+                {m.ai_total > 0 ? Math.round((m.ai_on / m.ai_total) * 100) + '%' : '0%'}
               </div>
               <div className="text-xs text-muted-foreground">
-                {snap.ai_on || 0}/{snap.ai_total || 0} conversations AI-enabled
+                {m.ai_on || 0}/{m.ai_total || 0} conversations AI-enabled
               </div>
             </div>
           </CardContent>
@@ -184,7 +137,7 @@ export default function Overview() {
             </div>
             <div className="space-y-2">
               <div className="text-2xl font-bold text-foreground">
-                {snap.queue_pending || 0} / {snap.queue_processing || 0}
+                {m.queue_pending || 0} / {m.queue_processing || 0}
               </div>
               <div className="text-xs text-muted-foreground">Pending / Processing</div>
             </div>

@@ -1,256 +1,501 @@
-import 'dotenv/config'
-import express from 'express'
-import helmet from 'helmet'
-import cors from 'cors'
-import cookieParser from 'cookie-parser'
-import rateLimit from 'express-rate-limit'
-import { Pool } from 'pg'
-import path from 'path'
-import { createServer } from 'http'
+import express, { type Request, Response, NextFunction } from "express";
+import helmet from "helmet";
+import cookieParser from "cookie-parser";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import rateLimit from "express-rate-limit";
+import pg from "pg";
+const { Pool } = pg;
+import { registerRoutes } from "./routes";
+import { setupVite, serveStatic, log } from "./vite";
 
-const app = express()
-const server = createServer(app)
-const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+// Environment variable validation
+function validateEnvironment() {
+  const requiredVars = [
+    'DATABASE_URL',
+    'SESSION_SECRET', 
+    'ADMIN_KEY'
+  ];
 
-// Middlewares base
-app.use(helmet())
-app.use(cors({ origin: true, credentials: true }))
-app.use(express.json({ limit: '1mb' }))
-app.use(cookieParser())
-
-// Auth mínima (ajusta a tu JWT si corresponde)
-function requireAuth(req: any, res: any, next: any) {
-  if (!req.cookies?.sid) return res.status(401).json({ error: 'unauthorized' })
-  req.user = { email: 'partners@letsaitomate.com', role: 'admin' }
-  next()
-}
-
-// Utilidad rango
-function parseRange(q: Record<string, any>) {
-  const now = new Date()
-  let from: Date | null = null, to: Date | null = null
-  if (q.from && q.to) {
-    const f = new Date(String(q.from)), t = new Date(String(q.to))
-    if (!isNaN(+f) && !isNaN(+t) && f < t) { from = f; to = t }
-  }
-  if (!from || !to) {
-    const r = String(q.range || '24h')
-    const map: Record<string, number> = { '24h': 24, '7d': 24*7, '30d': 24*30 }
-    const hours = map[r] ?? 24
-    to = now; from = new Date(now.getTime() - hours*60*60*1000)
-  }
-  return { from, to }
-}
-function rangeLabel(q: Record<string, any>) {
-  if (q.from && q.to) return 'Custom'
-  return ({ '24h':'Last 24h','7d':'Last 7 days','30d':'Last 30 days' } as any)[q.range] || 'Last 24h'
-}
-
-// Health
-app.get('/healthz', async (_req, res) => {
-  try { await pool.query('select 1'); res.json({ ok: true }) }
-  catch (e: any) { res.status(500).json({ ok:false, error: e.message }) }
-})
-
-// Auth state
-app.get('/auth/me', requireAuth, (req: any, res) => {
-  res.json({
-    isAuthenticated: true,
-    user: { email: req.user.email, role: req.user.role },
-    organization: { id: 'default', name: 'Tramia', slug: 'main' }
-  })
-})
-
-// API protegida
-app.use('/api', requireAuth)
-
-// Overview (Plan Pro)
-app.get('/api/metrics/overview', async (req, res) => {
-  const { from, to } = parseRange(req.query)
-  try {
-    const winSql = `
-    WITH
-    accepted AS (
-      SELECT count(*) AS c FROM public.hr_inbound_seen
-      WHERE seen_at >= $1 AND seen_at < $2
-    ),
-    qualified AS (
-      SELECT count(*) AS c FROM public.linkedin_jobs_incubadora
-      WHERE qualified_at >= $1 AND qualified_at < $2
-    ),
-    scheduled AS (
-      SELECT count(*) AS c FROM public.linkedin_jobs_incubadora
-      WHERE scheduled_at >= $1 AND scheduled_at < $2
-    ),
-    ttfr AS (
-      SELECT avg(extract(epoch from (
-        COALESCE(first_ai_message_at, last_human_message_at)
-        - COALESCE(first_lead_message_at, last_lead_message_at)
-      ))) AS seconds
-      FROM public.linkedin_jobs_incubadora
-      WHERE COALESCE(first_lead_message_at, last_lead_message_at) >= $1
-        AND COALESCE(first_lead_message_at, last_lead_message_at) <  $2
-        AND (COALESCE(first_ai_message_at, last_human_message_at) IS NOT NULL)
-    )
-    SELECT
-      COALESCE((SELECT c FROM accepted),0)   AS accepted_invitations,
-      COALESCE((SELECT c FROM qualified),0)  AS qualified,
-      COALESCE((SELECT c FROM scheduled),0)  AS scheduled,
-      COALESCE((SELECT seconds FROM ttfr),0) AS ttfr_seconds;
-    `
-    const win = await pool.query(winSql, [from, to])
-
-    const snapSql = `
-    WITH
-    active_leads AS (
-      SELECT count(DISTINCT user_id) AS c
-      FROM public.linkedin_jobs_incubadora
-      WHERE status IN ('pending','processing','wait')
-        AND (chatwoot_mode = 'ai-on' OR chatwoot_mode IS NULL)
-    ),
-    queue AS (
-      SELECT
-        sum((status='pending')::int) AS pending,
-        sum((status='processing')::int) AS processing
-      FROM public.linkedin_jobs_incubadora
-    ),
-    ai_status AS (
-      SELECT
-        sum((chatwoot_mode='ai-on')::int) AS ai_on,
-        count(*) AS total
-      FROM public.linkedin_jobs_incubadora
-    )
-    SELECT
-      COALESCE((SELECT c FROM active_leads),0)   AS active_leads,
-      COALESCE((SELECT pending FROM queue),0)    AS queue_pending,
-      COALESCE((SELECT processing FROM queue),0) AS queue_processing,
-      COALESCE((SELECT ai_on FROM ai_status),0)  AS ai_on,
-      COALESCE((SELECT total FROM ai_status),0)  AS ai_total;
-    `
-    const snap = await pool.query(snapSql)
-
-    res.json({ range: { from, to, label: rangeLabel(req.query) }, window: win.rows[0], snapshot: snap.rows[0] })
-  } catch (e: any) { res.status(500).json({ error: e.message || 'metrics_failed' }) }
-})
-
-// Recent inbound (últimos 3 mensajes del lead, en rango)
-app.get('/api/activity/recent-inbound', async (req, res) => {
-  const { from, to } = parseRange(req.query)
-  try {
-    const sql = `
-    WITH base AS (
-      SELECT j.id AS job_id, j.chatwoot_conversation_id, j.last_lead_message_at
-      FROM public.linkedin_jobs_incubadora j
-      WHERE j.chatwoot_conversation_id IS NOT NULL
-        AND j.last_lead_message_at IS NOT NULL
-        AND j.last_lead_message_at >= $1 AND j.last_lead_message_at < $2
-      ORDER BY j.last_lead_message_at DESC
-    )
-    SELECT DISTINCT ON (b.chatwoot_conversation_id)
-      b.chatwoot_conversation_id,
-      b.job_id,
-      b.last_lead_message_at AS at,
-      (
-        SELECT m.message
-        FROM public.linkedin_jobs_memory_incubadora m
-        WHERE m.session_id::text = b.chatwoot_conversation_id::text
-          AND m.created_at <= b.last_lead_message_at
-        ORDER BY m.created_at DESC
-        LIMIT 1
-      ) AS last_inbound
-    FROM base b
-    ORDER BY b.chatwoot_conversation_id, b.last_lead_message_at DESC
-    LIMIT 3;
-    `
-    const { rows } = await pool.query(sql, [from, to])
-    res.json(rows.map(r => ({
-      conversation_id: r.chatwoot_conversation_id,
-      job_id: r.job_id,
-      last_message: r.last_inbound || 'No message',
-      at: r.at
-    })))
-  } catch (e: any) { res.status(500).json({ error: e.message || 'recent_inbound_failed' }) }
-})
-
-// Conversations list (en rango por updated_at)
-app.get('/api/conversations/list', async (req, res) => {
-  const { from, to } = parseRange(req.query)
-  try {
-    const sql = `
-    SELECT
-      j.id AS job_id,
-      j.chatwoot_conversation_id,
-      j.user_id,
-      j.status,
-      j.agent_type,
-      j.updated_at,
-      j.last_lead_message_at,
-      (
-        SELECT m.message
-        FROM public.linkedin_jobs_memory_incubadora m
-        WHERE m.session_id::text = j.chatwoot_conversation_id::text
-        ORDER BY m.created_at DESC
-        LIMIT 1
-      ) AS last_message
-    FROM public.linkedin_jobs_incubadora j
-    WHERE j.chatwoot_conversation_id IS NOT NULL
-      AND j.updated_at >= $1 AND j.updated_at < $2
-    ORDER BY j.updated_at DESC
-    LIMIT 100;
-    `
-    const { rows } = await pool.query(sql, [from, to])
-    res.json(rows)
-  } catch (e: any) { res.status(500).json({ error: e.message || 'conversations_failed' }) }
-})
-
-// Running jobs (near-real-time)
-app.get('/api/queue/running', async (_req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT id, chatwoot_conversation_id, sender_account_id, agent_type,
-             status, processing_started_at, priority, updated_at
-      FROM public.linkedin_jobs_incubadora
-      WHERE status = 'processing'
-      ORDER BY processing_started_at DESC NULLS LAST
-      LIMIT 100;
-    `)
-    res.json(rows)
-  } catch (e: any) { res.status(500).json({ error: e.message || 'queue_running_failed' }) }
-})
-
-// Configuración de desarrollo y producción
-const port = Number(process.env.PORT || 5000)
-
-if (process.env.NODE_ENV === 'production') {
-  // PRODUCCIÓN: servir build estático
-  const staticDir = path.resolve(process.cwd(), 'dist/public')
-  app.use(express.static(staticDir))
-  app.get('*', (_req, res) => res.sendFile(path.join(staticDir, 'index.html')))
+  const missing = requiredVars.filter(varName => !process.env[varName]);
   
-  app.listen(port, () => console.log(`BFF listening on :${port}`))
-} else {
-  // DESARROLLO: usar ts-node-dev para reinicio automático
-  app.use(express.static('public'))
-  app.get('*', (_req, res) => {
-    res.send(`
-      <html>
-        <head>
-          <title>Tramia Development</title>
-          <meta charset="utf-8">
-        </head>
-        <body>
-          <div id="root">
-            <h1>Development Server Running</h1>
-            <p>Express backend is running on port ${port}</p>
-            <p>Visit <a href="/healthz">/healthz</a> to check API status</p>
-            <p>Development mode - frontend should be served separately</p>
-          </div>
-        </body>
-      </html>
-    `)
-  })
-  
-  server.listen(port, '0.0.0.0', () => {
-    console.log(`Development server listening on :${port}`)
-  })
+  if (missing.length > 0) {
+    console.error('❌ Missing required environment variables:', missing.join(', '));
+    console.error('Please ensure all production secrets are properly configured in deployment settings.');
+    process.exit(1);
+  }
+
+  // Set NODE_ENV to production if not specified in production environment
+  // Keep NODE_ENV as-is for proper development/production behavior
+
+  // Validate PORT
+  const port = process.env.PORT;
+  if (port && (isNaN(parseInt(port)) || parseInt(port) <= 0)) {
+    console.error('❌ Invalid PORT environment variable:', port);
+    process.exit(1);
+  }
+
+  console.log('✅ Environment validation passed');
+  console.log(`🌍 Running in ${process.env.NODE_ENV} mode`);
 }
+
+const app = express();
+app.set('trust proxy', 1);
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // Allow Vite HMR and dev scripts
+      connectSrc: ["'self'", "ws:", "wss:", "http:", "https:"], // Allow WebSocket for HMR
+      imgSrc: ["'self'", "data:", "https:", "http:"],
+    },
+  },
+  crossOriginEmbedderPolicy: false, // Disable COEP for dev compatibility
+}));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: false }));
+app.use(cookieParser());
+
+// Database connection with enhanced error handling
+let pool: pg.Pool;
+
+async function initializeDatabase() {
+  try {
+    console.log('🔄 Initializing database connection...');
+    pool = new Pool({ 
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+
+    // Test database connection
+    const client = await pool.connect();
+    await client.query('SELECT NOW()');
+    client.release();
+    console.log('✅ Database connection established');
+    
+    return pool;
+  } catch (error) {
+    console.error('❌ Database connection failed:', error);
+    console.error('Please verify DATABASE_URL is properly formatted for PostgreSQL connection');
+    throw error;
+  }
+}
+
+// Ensure database tables exist with retry logic
+async function ensureTables(retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      // Create admin_users table
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS public.admin_users (
+          id BIGSERIAL PRIMARY KEY,
+          email TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'admin',
+          is_active BOOLEAN NOT NULL DEFAULT TRUE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      
+      // Create hr_inbound_seen table with index
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS public.hr_inbound_seen (
+          id BIGSERIAL PRIMARY KEY,
+          user_id TEXT,
+          seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          source TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_hr_seen_at ON public.hr_inbound_seen(seen_at);
+      `);
+      
+      console.log('✅ Database tables and indexes ensured');
+      return;
+    } catch (error) {
+      console.error(`❌ Failed to create database tables (attempt ${attempt}/${retries}):`, error);
+      if (attempt === retries) {
+        console.error('💥 Database initialization failed after all retries');
+        throw error;
+      }
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+}
+
+// Authentication constants and helpers
+const JWT_COOKIE = 'sid';
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
+
+function signToken(user: any) {
+  return jwt.sign(
+    { sub: user.id, email: user.email, role: user.role },
+    process.env.SESSION_SECRET!,
+    { expiresIn: '12h', issuer: 'dashboard' }
+  );
+}
+
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (req.headers['x-admin-key'] !== process.env.ADMIN_KEY) {
+    return res.sendStatus(403);
+  }
+  next();
+}
+
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const raw = req.cookies[JWT_COOKIE] || (req.headers.authorization || '').replace(/^Bearer\s+/, '');
+  if (!raw) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    (req as any).user = jwt.verify(raw, process.env.SESSION_SECRET!);
+    return next();
+  } catch {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+}
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  const path = req.path;
+  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+
+  const originalResJson = res.json;
+  res.json = function (bodyJson, ...args) {
+    capturedJsonResponse = bodyJson;
+    return originalResJson.apply(res, [bodyJson, ...args]);
+  };
+
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    if (path.startsWith("/api")) {
+      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+      if (capturedJsonResponse) {
+        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      }
+
+      if (logLine.length > 80) {
+        logLine = logLine.slice(0, 79) + "…";
+      }
+
+      log(logLine);
+    }
+  });
+
+  next();
+});
+
+(async () => {
+  try {
+    // Validate environment variables first
+    validateEnvironment();
+    
+    // Initialize database connection
+    await initializeDatabase();
+    
+    // Initialize database tables
+    await ensureTables();
+
+  // Health check endpoint
+  app.get('/healthz', async (_req, res) => {
+    try {
+      await pool.query('SELECT 1');
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: String(e) });
+    }
+  });
+
+  // Admin user creation endpoint (protected by ADMIN_KEY)
+  app.post('/admin/users', requireAdmin, async (req, res) => {
+    try {
+      const { email, password, role = 'admin' } = req.body || {};
+      if (!email || !password) {
+        return res.status(400).json({ error: 'email/password required' });
+      }
+      const hash = await bcrypt.hash(password, 12);
+      const { rows } = await pool.query(
+        `INSERT INTO public.admin_users(email,password_hash,role)
+         VALUES ($1,$2,$3)
+         ON CONFLICT (email) DO UPDATE SET password_hash=EXCLUDED.password_hash, role=EXCLUDED.role
+         RETURNING id,email,role,created_at`,
+        [email, hash, role]
+      );
+      res.json(rows[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to create user' });
+    }
+  });
+
+  // Authentication routes
+  app.post('/auth/login', loginLimiter, async (req, res) => {
+    try {
+      const { email, password } = req.body || {};
+      if (!email || !password) {
+        return res.status(400).json({ error: 'email/password required' });
+      }
+      const { rows } = await pool.query(
+        `SELECT * FROM public.admin_users WHERE email=$1 AND is_active=TRUE`,
+        [email]
+      );
+      const user = rows[0];
+      if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+        return res.status(401).json({ error: 'invalid' });
+      }
+      const token = signToken(user);
+      res.cookie(JWT_COOKIE, token, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 12 * 60 * 60 * 1000, // 12 hours
+        path: '/'
+      });
+      res.json({ ok: true, email: user.email, role: user.role });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Login failed' });
+    }
+  });
+
+  app.post('/auth/logout', (req, res) => {
+    res.clearCookie(JWT_COOKIE, {
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/'
+    });
+    res.json({ ok: true });
+  });
+
+  app.get('/auth/me', requireAuth, (_req, res) => {
+    const u = ( _req as any ).user as { email: string; role: string };
+    res.json({
+      isAuthenticated: true,
+      user: { email: u.email, role: u.role },
+      organization: { id: 'default', name: 'Tramia', slug: 'main' },
+    });
+  });
+
+  // Protect all API routes with authentication
+  app.use('/api', requireAuth);
+
+  // === METRICS: /api/metrics/overview ===
+  // Devuelve 0 si no hay datos; el FE renombra la tarjeta a "Accepted Invitations"
+  app.get('/api/metrics/overview', async (_req, res) => {
+    if (process.env.DEBUG_DIAGNOSTICS) {
+      console.log("[DIAGNOSTICO BFF] Solicitando /api/metrics/overview");
+    }
+    try {
+      const sql = `
+      WITH
+      hr_accepted AS (
+        SELECT count(*) AS c
+        FROM public.hr_inbound_seen
+        WHERE seen_at >= NOW() - interval '24 hours'
+      ),
+      active_leads AS (
+        SELECT count(DISTINCT id) AS c
+        FROM public.linkedin_jobs_incubadora
+        WHERE status IN ('pending','processing','wait')
+      ),
+      qualified_24h AS (
+        SELECT count(*) AS c
+        FROM public.linkedin_jobs_incubadora
+        WHERE updated_at >= NOW() - interval '24 hours'
+          AND (
+            NULLIF(result_json->'qualifier_llm'->>'is_task_complete','')::boolean IS TRUE
+            OR lower(status) LIKE 'qualif%'
+          )
+      ),
+      scheduled_24h AS (
+        SELECT count(*) AS c
+        FROM public.linkedin_jobs_incubadora
+        WHERE updated_at >= NOW() - interval '24 hours'
+          AND (
+            NULLIF(result_json->'scheduler_llm'->>'is_task_complete','')::boolean IS TRUE
+            OR lower(status) LIKE 'schedul%' OR lower(status) LIKE 'booking%'
+          )
+      ),
+      queue AS (
+        SELECT
+          sum((status='pending')::int) AS pending,
+          sum((status='processing')::int) AS processing
+        FROM public.linkedin_jobs_incubadora
+      ),
+      ai_status AS (
+        SELECT
+          sum((chatwoot_mode = 'ai-on')::int) AS ai_on,
+          count(*) AS total
+        FROM public.linkedin_jobs_incubadora
+      ),
+      ttfr AS (
+        SELECT 0::numeric AS seconds
+      )
+      SELECT
+        COALESCE((SELECT c FROM hr_accepted),0)       AS hr_accepted_24h,
+        COALESCE((SELECT c FROM active_leads),0)      AS active_leads,
+        COALESCE((SELECT c FROM qualified_24h),0)     AS qualified_24h,
+        COALESCE((SELECT c FROM scheduled_24h),0)     AS scheduled_24h,
+        COALESCE((SELECT pending FROM queue),0)       AS queue_pending,
+        COALESCE((SELECT processing FROM queue),0)    AS queue_processing,
+        COALESCE((SELECT ai_on FROM ai_status),0)     AS ai_on,
+        COALESCE((SELECT total FROM ai_status),0)     AS ai_total,
+        COALESCE((SELECT seconds FROM ttfr),0)        AS ttfr_seconds;
+      `;
+      const { rows } = await pool.query(sql);
+      
+      if (process.env.DEBUG_DIAGNOSTICS) {
+        console.log("[DIAGNOSTICO BFF] Resultado crudo de PostgreSQL:", JSON.stringify(rows, null, 2));
+        if (!rows || rows.length === 0) {
+          console.log("[DIAGNOSTICO BFF] Advertencia: PostgreSQL devolvió un array vacío o nulo.");
+        }
+      }
+
+      res.json(rows[0]);
+    } catch (error: any) {
+      console.error("[DIAGNOSTICO BFF] ERROR en PostgreSQL:", error.message, error.stack);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  // === QUEUE STATUS: /api/queue/status ===
+  app.get('/api/queue/status', async (_req, res) => {
+    try {
+      const { rows } = await pool.query(`
+        SELECT status, count(*)::int AS count
+        FROM public.linkedin_jobs_incubadora
+        GROUP BY status
+      `);
+      const base: Record<string, number> = { pending: 0, processing: 0, wait: 0, done: 0, failed: 0 };
+      for (const r of rows) base[r.status] = r.count;
+      res.json(Object.entries(base).map(([status, count]) => ({ status, count })));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'queue_failed' });
+    }
+  });
+
+  // === RECENT CONVERSATIONS: /api/activity/recent-conversations ===
+  // Últimas 3 conversaciones distintas con su último mensaje detectado en data json
+  app.get('/api/activity/recent-conversations', async (_req, res) => {
+    if (process.env.DEBUG_DIAGNOSTICS) {
+      console.log("[DIAGNOSTICO BFF] Solicitando /api/activity/recent-conversations");
+    }
+    try {
+      const sql = `
+      WITH latest AS (
+        SELECT
+          id,
+          chatwoot_conversation_id::text AS chatwoot_conversation_id,
+          updated_at,
+          COALESCE(
+            NULLIF(result_json->'closer_llm'->>'response_text',''),
+            NULLIF(result_json->'scheduler_llm'->>'response_text',''),
+            NULLIF(result_json->'objeciones_llm'->>'response_text',''),
+            NULLIF(result_json->'follow_up_llm'->>'response_text',''),
+            NULLIF(result_json->'qualifier_llm'->>'response_text',''),
+            'No hay mensaje registrado'
+          ) AS last_message
+        FROM public.linkedin_jobs_incubadora
+        WHERE chatwoot_conversation_id IS NOT NULL
+        ORDER BY updated_at DESC
+      )
+      SELECT DISTINCT ON (chatwoot_conversation_id)
+        chatwoot_conversation_id,
+        id AS job_id,
+        last_message,
+        updated_at
+      FROM latest
+      ORDER BY chatwoot_conversation_id, updated_at DESC
+      LIMIT 3;
+      `;
+      const { rows } = await pool.query(sql);
+      
+      if (process.env.DEBUG_DIAGNOSTICS) {
+        console.log("[DIAGNOSTICO BFF] Resultado crudo de PostgreSQL:", JSON.stringify(rows, null, 2));
+        if (!rows || rows.length === 0) {
+          console.log("[DIAGNOSTICO BFF] Advertencia: PostgreSQL devolvió un array vacío o nulo.");
+        }
+      }
+
+      const conversations = rows.map(r => ({
+        conversation_id: r.chatwoot_conversation_id,
+        job_id: r.job_id,
+        last_message: r.last_message,
+        at: r.updated_at
+      }));
+      
+      res.json(conversations);
+    } catch (error: any) {
+      console.error("[DIAGNOSTICO BFF] ERROR en PostgreSQL:", error.message, error.stack);
+      // IMPORTANTE: Devolver un 500. Si devuelves un 200 con datos vacíos por error, TanStack Query lo cacheará como éxito.
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  // Data wipe endpoint for testing cleanup
+  app.post('/admin/wipe-data', requireAdmin, async (_req, res) => {
+    try {
+      await pool.query('BEGIN');
+      await pool.query('DELETE FROM public.linkedin_jobs_memory_incubadora');
+      await pool.query('DELETE FROM public.hr_inbound_seen');
+      await pool.query('DELETE FROM public.linkedin_jobs_incubadora');
+      await pool.query('COMMIT');
+      res.json({ ok: true });
+    } catch (e: any) {
+      await pool.query('ROLLBACK');
+      res.status(500).json({ error: e.message || 'wipe_failed' });
+    }
+  });
+
+  const server = await registerRoutes(app);
+
+  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    const status = err.status || err.statusCode || 500;
+    const message = err.message || "Internal Server Error";
+
+    console.error('Server error:', err);
+    res.status(status).json({ message });
+  });
+
+  // Let the SPA handle authentication state client-side
+  // Only protect API routes server-side (already done above)
+
+  // importantly only setup vite in development and after
+  // setting up all the other routes so the catch-all route
+  // doesn't interfere with the other routes
+  if (app.get("env") === "development") {
+    await setupVite(app, server);
+  } else {
+    serveStatic(app);
+  }
+
+  // ALWAYS serve the app on the port specified in the environment variable PORT
+  // Other ports are firewalled. Default to 5000 if not specified.
+  // this serves both the API and the client.
+  // It is the only port that is not firewalled.
+    const port = parseInt(process.env.PORT || '5000', 10);
+    server.listen({
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    }, () => {
+      console.log('🚀 Tramia dashboard server started successfully');
+      log(`serving on port ${port}`);
+    });
+
+  } catch (error) {
+    console.error('💥 Application startup failed:', error);
+    console.error('This may be due to:');
+    console.error('- Missing required environment variables or secrets configuration');
+    console.error('- Database connection or initialization failure');
+    console.error('- Invalid PORT environment variable');
+    console.error('Please check your deployment configuration and try again.');
+    process.exit(1);
+  }
+})();
