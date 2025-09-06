@@ -1,31 +1,31 @@
-require('dotenv/config')
-const express = require('express')
-const helmet = require('helmet')
-const cors = require('cors')
-const cookieParser = require('cookie-parser')
-const rateLimit = require('express-rate-limit')
-const { Pool } = require('pg')
-const path = require('path')
+import 'dotenv/config'
+import express from 'express'
+import helmet from 'helmet'
+import cors from 'cors'
+import cookieParser from 'cookie-parser'
+import rateLimit from 'express-rate-limit'
+import { Pool } from 'pg'
+import path from 'path'
+import { createServer } from 'http'
 
 const app = express()
+const server = createServer(app)
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 
-// --- middlewares base ---
+// Middlewares base
 app.use(helmet())
 app.use(cors({ origin: true, credentials: true }))
 app.use(express.json({ limit: '1mb' }))
 app.use(cookieParser())
 
-// --- auth mínima (adaptá a tu lógica JWT si ya la tenías) ---
+// Auth mínima (ajusta a tu JWT si corresponde)
 function requireAuth(req: any, res: any, next: any) {
-  // si ya tenés tu cookie JWT, validala aquí; mientras tanto pasamos si existe cookie 'sid'
   if (!req.cookies?.sid) return res.status(401).json({ error: 'unauthorized' })
-  // podés decodificar y guardar req.user si querés
   req.user = { email: 'partners@letsaitomate.com', role: 'admin' }
   next()
 }
 
-// --- utils rango ---
+// Utilidad rango
 function parseRange(q: Record<string, any>) {
   const now = new Date()
   let from: Date | null = null, to: Date | null = null
@@ -46,25 +46,25 @@ function rangeLabel(q: Record<string, any>) {
   return ({ '24h':'Last 24h','7d':'Last 7 days','30d':'Last 30 days' } as any)[q.range] || 'Last 24h'
 }
 
-// --- health ---
+// Health
 app.get('/healthz', async (_req, res) => {
   try { await pool.query('select 1'); res.json({ ok: true }) }
   catch (e: any) { res.status(500).json({ ok:false, error: e.message }) }
 })
 
-// --- me ---
+// Auth state
 app.get('/auth/me', requireAuth, (req: any, res) => {
   res.json({
     isAuthenticated: true,
     user: { email: req.user.email, role: req.user.role },
-    organization: { id: 'default', name: 'Tramia', slug: 'main' },
+    organization: { id: 'default', name: 'Tramia', slug: 'main' }
   })
 })
 
-// --- API protegida ---
+// API protegida
 app.use('/api', requireAuth)
 
-// OVERVIEW (Plan Pro: window + snapshot)
+// Overview (Plan Pro)
 app.get('/api/metrics/overview', async (req, res) => {
   const { from, to } = parseRange(req.query)
   try {
@@ -133,7 +133,7 @@ app.get('/api/metrics/overview', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message || 'metrics_failed' }) }
 })
 
-// Recent inbound (últimos 3 del lead en rango)
+// Recent inbound (últimos 3 mensajes del lead, en rango)
 app.get('/api/activity/recent-inbound', async (req, res) => {
   const { from, to } = parseRange(req.query)
   try {
@@ -172,7 +172,7 @@ app.get('/api/activity/recent-inbound', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message || 'recent_inbound_failed' }) }
 })
 
-// Conversations list
+// Conversations list (en rango por updated_at)
 app.get('/api/conversations/list', async (req, res) => {
   const { from, to } = parseRange(req.query)
   try {
@@ -203,7 +203,7 @@ app.get('/api/conversations/list', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message || 'conversations_failed' }) }
 })
 
-// Running jobs
+// Running jobs (near-real-time)
 app.get('/api/queue/running', async (_req, res) => {
   try {
     const { rows } = await pool.query(`
@@ -218,32 +218,39 @@ app.get('/api/queue/running', async (_req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message || 'queue_running_failed' }) }
 })
 
-// --- Start server function ---
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    // En desarrollo, intentar cargar Vite pero no fallar si no está disponible
-    try {
-      const { setupViteServer } = require('./vite')
-      await setupViteServer(app)
-      console.log('Vite middleware attached')
-    } catch (err: any) {
-      console.log('Warning: Could not load Vite middleware:', err.message)
-      console.log('Running server without frontend serving')
-    }
-  } else {
-    // --- Static PRODUCTION: dist/public ---
-    const staticDir = path.resolve(process.cwd(), 'dist/public')
-    app.use(express.static(staticDir))
-    app.get('*', (_req, res) => res.sendFile(path.join(staticDir, 'index.html')))
-  }
+// Configuración de desarrollo y producción
+const port = Number(process.env.PORT || 5000)
 
-  const port = Number(process.env.PORT || 5000)
-  app.listen(port, () => {
-    console.log(`BFF listening on :${port}`)
-    console.log(`Health check: http://localhost:${port}/healthz`)
-    console.log(`Auth check: http://localhost:${port}/auth/me`)
+if (process.env.NODE_ENV === 'production') {
+  // PRODUCCIÓN: servir build estático
+  const staticDir = path.resolve(process.cwd(), 'dist/public')
+  app.use(express.static(staticDir))
+  app.get('*', (_req, res) => res.sendFile(path.join(staticDir, 'index.html')))
+  
+  app.listen(port, () => console.log(`BFF listening on :${port}`))
+} else {
+  // DESARROLLO: usar ts-node-dev para reinicio automático
+  app.use(express.static('public'))
+  app.get('*', (_req, res) => {
+    res.send(`
+      <html>
+        <head>
+          <title>Tramia Development</title>
+          <meta charset="utf-8">
+        </head>
+        <body>
+          <div id="root">
+            <h1>Development Server Running</h1>
+            <p>Express backend is running on port ${port}</p>
+            <p>Visit <a href="/healthz">/healthz</a> to check API status</p>
+            <p>Development mode - frontend should be served separately</p>
+          </div>
+        </body>
+      </html>
+    `)
+  })
+  
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`Development server listening on :${port}`)
   })
 }
-
-startServer().catch(console.error)
-
