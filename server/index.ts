@@ -7,7 +7,18 @@ import rateLimit from "express-rate-limit";
 import pg from "pg";
 const { Pool } = pg;
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+// import { setupVite, serveStatic, log } from "./vite"; // Removed to avoid vite dependency
+
+// Local log function to avoid vite dependency
+function log(message: string, source = "express") {
+  const formattedTime = new Date().toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit", 
+    second: "2-digit",
+    hour12: true,
+  });
+  console.log(`${formattedTime} [${source}] ${message}`);
+}
 
 // Environment variable validation
 function validateEnvironment() {
@@ -569,9 +580,29 @@ app.use((req, res, next) => {
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
   if (app.get("env") === "development") {
-    await setupVite(app, server);
+    try {
+      const viteModule = await import('./vite');
+      if (viteModule.setupVite) {
+        await viteModule.setupVite(app, server);
+        log("Vite development server initialized");
+      }
+    } catch (e) {
+      log("Vite module not available - running without HMR", "warning");
+      log("Install vite dev dependency to enable development features", "warning");
+    }
   } else {
-    serveStatic(app);
+    try {
+      const viteModule = await import('./vite');
+      if (viteModule.serveStatic) {
+        viteModule.serveStatic(app);
+      }
+    } catch (e) {
+      log("Static serving module not available - serving basic fallback", "warning");
+      // Basic static fallback
+      app.use("*", (_req, res) => {
+        res.status(503).json({ error: "Frontend not available" });
+      });
+    }
   }
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
