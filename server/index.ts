@@ -285,42 +285,73 @@ app.use((req, res, next) => {
   // Protect all API routes with authentication
   app.use('/api', requireAuth);
 
-  // === METRICS: /api/metrics/overview ===
-  // Devuelve 0 si no hay datos; el FE renombra la tarjeta a "Accepted Invitations"
-  app.get('/api/metrics/overview', async (_req, res) => {
-    if (process.env.DEBUG_DIAGNOSTICS) {
-      console.log("[DIAGNOSTICO BFF] Solicitando /api/metrics/overview");
+  // === HELPERS FOR PLAN PRO ===
+  function parseRange(q: Record<string, any>) {
+    const now = new Date();
+    let from: Date | null = null, to: Date | null = null;
+    if (q.from && q.to) {
+      const f = new Date(String(q.from)), t = new Date(String(q.to));
+      if (!isNaN(+f) && !isNaN(+t) && f < t) { from = f; to = t; }
     }
+    if (!from || !to) {
+      const r = String(q.range || '24h');
+      const map: Record<string, number> = { '24h': 24, '7d': 24*7, '30d': 24*30 };
+      const hours = map[r] ?? 24;
+      to = now; from = new Date(now.getTime() - hours * 60 * 60 * 1000);
+    }
+    return { from, to };
+  }
+  function rangeLabel(q: Record<string, any>) {
+    if (q.from && q.to) return 'Custom';
+    return ({ '24h': 'Last 24h', '7d': 'Last 7 days', '30d': 'Last 30 days' } as any)[q.range] || 'Last 24h';
+  }
+
+  // === METRICS: /api/metrics/overview (Plan Pro with range) ===
+  app.get('/api/metrics/overview', requireAuth, async (req, res) => {
+    const { from, to } = parseRange(req.query);
     try {
-      const sql = `
+      const winSql = `
       WITH
-      hr_accepted AS (
+      accepted AS (
         SELECT count(*) AS c
         FROM public.hr_inbound_seen
-        WHERE seen_at >= NOW() - interval '24 hours'
+        WHERE seen_at >= $1 AND seen_at < $2
       ),
+      qualified AS (
+        SELECT count(*) AS c
+        FROM public.linkedin_jobs_incubadora
+        WHERE qualified_at >= $1 AND qualified_at < $2
+      ),
+      scheduled AS (
+        SELECT count(*) AS c
+        FROM public.linkedin_jobs_incubadora
+        WHERE scheduled_at >= $1 AND scheduled_at < $2
+      ),
+      ttfr AS (
+        SELECT avg(extract(epoch from (
+          COALESCE(first_ai_message_at, last_human_message_at)
+          - COALESCE(first_lead_message_at, last_lead_message_at)
+        ))) AS seconds
+        FROM public.linkedin_jobs_incubadora
+        WHERE COALESCE(first_lead_message_at, last_lead_message_at) >= $1
+          AND COALESCE(first_lead_message_at, last_lead_message_at) <  $2
+          AND (COALESCE(first_ai_message_at, last_human_message_at) IS NOT NULL)
+      )
+      SELECT
+        COALESCE((SELECT c FROM accepted),0)   AS accepted_invitations,
+        COALESCE((SELECT c FROM qualified),0)  AS qualified,
+        COALESCE((SELECT c FROM scheduled),0)  AS scheduled,
+        COALESCE((SELECT seconds FROM ttfr),0) AS ttfr_seconds;
+      `;
+      const win = await pool.query(winSql, [from, to]);
+
+      const snapSql = `
+      WITH
       active_leads AS (
-        SELECT count(DISTINCT id) AS c
+        SELECT count(DISTINCT user_id) AS c
         FROM public.linkedin_jobs_incubadora
         WHERE status IN ('pending','processing','wait')
-      ),
-      qualified_24h AS (
-        SELECT count(*) AS c
-        FROM public.linkedin_jobs_incubadora
-        WHERE updated_at >= NOW() - interval '24 hours'
-          AND (
-            NULLIF(result_json->'qualifier_llm'->>'is_task_complete','')::boolean IS TRUE
-            OR lower(status) LIKE 'qualif%'
-          )
-      ),
-      scheduled_24h AS (
-        SELECT count(*) AS c
-        FROM public.linkedin_jobs_incubadora
-        WHERE updated_at >= NOW() - interval '24 hours'
-          AND (
-            NULLIF(result_json->'scheduler_llm'->>'is_task_complete','')::boolean IS TRUE
-            OR lower(status) LIKE 'schedul%' OR lower(status) LIKE 'booking%'
-          )
+          AND (chatwoot_mode = 'ai-on' OR chatwoot_mode IS NULL)
       ),
       queue AS (
         SELECT
@@ -330,38 +361,21 @@ app.use((req, res, next) => {
       ),
       ai_status AS (
         SELECT
-          sum((chatwoot_mode = 'ai-on')::int) AS ai_on,
+          sum((chatwoot_mode='ai-on')::int) AS ai_on,
           count(*) AS total
         FROM public.linkedin_jobs_incubadora
-      ),
-      ttfr AS (
-        SELECT 0::numeric AS seconds
       )
       SELECT
-        COALESCE((SELECT c FROM hr_accepted),0)       AS hr_accepted_24h,
-        COALESCE((SELECT c FROM active_leads),0)      AS active_leads,
-        COALESCE((SELECT c FROM qualified_24h),0)     AS qualified_24h,
-        COALESCE((SELECT c FROM scheduled_24h),0)     AS scheduled_24h,
-        COALESCE((SELECT pending FROM queue),0)       AS queue_pending,
-        COALESCE((SELECT processing FROM queue),0)    AS queue_processing,
-        COALESCE((SELECT ai_on FROM ai_status),0)     AS ai_on,
-        COALESCE((SELECT total FROM ai_status),0)     AS ai_total,
-        COALESCE((SELECT seconds FROM ttfr),0)        AS ttfr_seconds;
+        COALESCE((SELECT c FROM active_leads),0)   AS active_leads,
+        COALESCE((SELECT pending FROM queue),0)    AS queue_pending,
+        COALESCE((SELECT processing FROM queue),0) AS queue_processing,
+        COALESCE((SELECT ai_on FROM ai_status),0)  AS ai_on,
+        COALESCE((SELECT total FROM ai_status),0)  AS ai_total;
       `;
-      const { rows } = await pool.query(sql);
-      
-      if (process.env.DEBUG_DIAGNOSTICS) {
-        console.log("[DIAGNOSTICO BFF] Resultado crudo de PostgreSQL:", JSON.stringify(rows, null, 2));
-        if (!rows || rows.length === 0) {
-          console.log("[DIAGNOSTICO BFF] Advertencia: PostgreSQL devolvió un array vacío o nulo.");
-        }
-      }
+      const snap = await pool.query(snapSql);
 
-      res.json(rows[0]);
-    } catch (error: any) {
-      console.error("[DIAGNOSTICO BFF] ERROR en PostgreSQL:", error.message, error.stack);
-      res.status(500).json({ error: 'Internal Server Error' });
-    }
+      res.json({ range: { from, to, label: rangeLabel(req.query) }, window: win.rows[0], snapshot: snap.rows[0] });
+    } catch (e:any) { res.status(500).json({ error: e.message || 'metrics_failed' }); }
   });
 
   // === QUEUE STATUS: /api/queue/status ===
@@ -380,7 +394,92 @@ app.use((req, res, next) => {
     }
   });
 
-  // === RECENT CONVERSATIONS: /api/activity/recent-conversations ===
+  // === RECENT INBOUND MESSAGES: /api/activity/recent-inbound ===
+  app.get('/api/activity/recent-inbound', requireAuth, async (req, res) => {
+    const { from, to } = parseRange(req.query);
+    try {
+      const sql = `
+      WITH base AS (
+        SELECT j.id AS job_id, j.chatwoot_conversation_id, j.last_lead_message_at
+        FROM public.linkedin_jobs_incubadora j
+        WHERE j.chatwoot_conversation_id IS NOT NULL
+          AND j.last_lead_message_at IS NOT NULL
+          AND j.last_lead_message_at >= $1 AND j.last_lead_message_at < $2
+        ORDER BY j.last_lead_message_at DESC
+      )
+      SELECT DISTINCT ON (b.chatwoot_conversation_id)
+        b.chatwoot_conversation_id,
+        b.job_id,
+        b.last_lead_message_at AS at,
+        (
+          SELECT m.content
+          FROM public.agent_jobs_memory_incubadora m
+          WHERE m.job_id = b.job_id
+            AND m.created_at <= b.last_lead_message_at
+          ORDER BY m.created_at DESC
+          LIMIT 1
+        ) AS last_inbound
+      FROM base b
+      ORDER BY b.chatwoot_conversation_id, b.last_lead_message_at DESC
+      LIMIT 3;
+      `;
+      const { rows } = await pool.query(sql, [from, to]);
+      res.json(rows.map(r => ({
+        conversation_id: r.chatwoot_conversation_id,
+        job_id: r.job_id,
+        last_message: r.last_inbound || 'No message',
+        at: r.at
+      })));
+    } catch (e:any) { res.status(500).json({ error: e.message || 'recent_inbound_failed' }); }
+  });
+
+  // === CONVERSATIONS LIST: /api/conversations/list ===
+  app.get('/api/conversations/list', requireAuth, async (req, res) => {
+    const { from, to } = parseRange(req.query);
+    try {
+      const sql = `
+      SELECT
+        j.id AS job_id,
+        j.chatwoot_conversation_id,
+        j.user_id,
+        j.status,
+        j.agent_type,
+        j.updated_at,
+        j.last_lead_message_at,
+        (
+          SELECT m.content
+          FROM public.agent_jobs_memory_incubadora m
+          WHERE m.job_id = j.id
+          ORDER BY m.created_at DESC
+          LIMIT 1
+        ) AS last_message
+      FROM public.linkedin_jobs_incubadora j
+      WHERE j.chatwoot_conversation_id IS NOT NULL
+        AND j.updated_at >= $1 AND j.updated_at < $2
+      ORDER BY j.updated_at DESC
+      LIMIT 100;
+      `;
+      const { rows } = await pool.query(sql, [from, to]);
+      res.json(rows);
+    } catch (e:any) { res.status(500).json({ error: e.message || 'conversations_failed' }); }
+  });
+
+  // === RUNNING JOBS: /api/queue/running ===
+  app.get('/api/queue/running', requireAuth, async (_req, res) => {
+    try {
+      const { rows } = await pool.query(`
+        SELECT id, chatwoot_conversation_id, sender_account_id, agent_type,
+               status, processing_started_at, priority, updated_at
+        FROM public.linkedin_jobs_incubadora
+        WHERE status = 'processing'
+        ORDER BY processing_started_at DESC NULLS LAST
+        LIMIT 100;
+      `);
+      res.json(rows);
+    } catch (e:any) { res.status(500).json({ error: e.message || 'queue_running_failed' }); }
+  });
+
+  // === RECENT CONVERSATIONS: /api/activity/recent-conversations (Legacy) ===
   // Últimas 3 conversaciones distintas con su último mensaje detectado en data json
   app.get('/api/activity/recent-conversations', async (_req, res) => {
     if (process.env.DEBUG_DIAGNOSTICS) {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Search, HelpCircle, Moon, Sun, Bell } from "lucide-react";
+import { Search, Moon, Sun, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -53,15 +53,6 @@ export function Topbar() {
             />
           </div>
 
-          {/* Help */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="p-2 hover:bg-muted"
-            data-testid="help-button"
-          >
-            <HelpCircle className="h-4 w-4" />
-          </Button>
 
           {/* Theme Toggle */}
           <Button
