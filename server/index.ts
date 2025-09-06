@@ -7,7 +7,7 @@ import rateLimit from "express-rate-limit";
 import pg from "pg";
 const { Pool } = pg;
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+import { setupVite, serveStatic, log } from "./vite-fallback";
 
 // Environment variable validation
 function validateEnvironment() {
