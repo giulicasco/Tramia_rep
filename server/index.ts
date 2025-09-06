@@ -1,11 +1,11 @@
-import 'dotenv/config'
-import express from 'express'
-import helmet from 'helmet'
-import cors from 'cors'
-import cookieParser from 'cookie-parser'
-import rateLimit from 'express-rate-limit'
-import { Pool } from 'pg'
-import path from 'path'
+require('dotenv/config')
+const express = require('express')
+const helmet = require('helmet')
+const cors = require('cors')
+const cookieParser = require('cookie-parser')
+const rateLimit = require('express-rate-limit')
+const { Pool } = require('pg')
+const path = require('path')
 
 const app = express()
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
