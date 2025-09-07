@@ -232,24 +232,50 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  let dbConnected = false;
+  
   try {
     // Validate environment variables first
     validateEnvironment();
     
-    // Initialize database connection
-    await initializeDatabase();
-    
-    // Initialize database tables
-    await ensureTables();
+    try {
+      // Initialize database connection
+      await initializeDatabase();
+      
+      // Initialize database tables
+      await ensureTables();
+      dbConnected = true;
+    } catch (dbError) {
+      console.error('⚠️  Database initialization failed, but continuing startup in degraded mode');
+      console.error('The application will start without database connectivity');
+      console.error('Database operations will fail until connection is restored');
+      console.error('Database error:', dbError instanceof Error ? dbError.message : dbError);
+    }
 
   // Health check endpoint
   app.get('/healthz', async (_req, res) => {
+    const health: any = { 
+      ok: true,
+      database: 'disconnected',
+      timestamp: new Date().toISOString()
+    };
+    
     try {
-      await pool.query('SELECT 1');
-      res.json({ ok: true });
+      if (pool) {
+        await pool.query('SELECT 1');
+        health.database = 'connected';
+      } else {
+        health.ok = false;
+        health.database = 'not_initialized';
+      }
     } catch (e: any) {
-      res.status(500).json({ ok: false, error: String(e) });
+      health.ok = false;
+      health.database = 'error';
+      health.error = String(e);
     }
+    
+    const status = health.ok ? 200 : 503;
+    res.status(status).json(health);
   });
 
   // Admin user creation endpoint (protected by ADMIN_KEY)
@@ -546,9 +572,16 @@ app.use((req, res, next) => {
     console.error('💥 Application startup failed:', error);
     console.error('This may be due to:');
     console.error('- Missing required environment variables or secrets configuration');
-    console.error('- Database connection or initialization failure');
+    console.error('- Server initialization failure');
     console.error('- Invalid PORT environment variable');
     console.error('Please check your deployment configuration and try again.');
-    process.exit(1);
+    
+    // Only exit if it's a critical non-database error
+    if (!dbConnected && error instanceof Error && error.message.includes('environment')) {
+      console.error('Critical environment error, exiting...');
+      process.exit(1);
+    } else {
+      console.error('Non-critical error, attempting graceful degradation...');
+    }
   }
 })();
