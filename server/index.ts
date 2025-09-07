@@ -124,6 +124,46 @@ async function initializeDatabase(retries = 5, initialDelay = 1000) {
   throw lastError;
 }
 
+// Periodic database reconnection function
+async function attemptDatabaseReconnection() {
+  if (!pool) {
+    console.log('🔄 Attempting to reconnect to database...');
+    try {
+      await initializeDatabase();
+      await ensureTables();
+      console.log('✅ Database reconnection successful');
+      return true;
+    } catch (error) {
+      console.error('❌ Database reconnection failed:', error instanceof Error ? error.message : error);
+      return false;
+    }
+  }
+  return true;
+}
+
+// Middleware to handle database errors gracefully
+function withDatabaseErrorHandling(handler: any) {
+  return async (req: Request, res: Response, next?: NextFunction) => {
+    try {
+      await handler(req, res, next);
+    } catch (error: any) {
+      if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.message?.includes('pool')) {
+        console.error('Database connection error in API route:', error.message);
+        res.status(503).json({ 
+          error: 'Database temporarily unavailable. Please try again later.',
+          code: 'DATABASE_UNAVAILABLE'
+        });
+      } else {
+        console.error('API route error:', error);
+        res.status(500).json({ 
+          error: error.message || 'Internal server error',
+          code: 'INTERNAL_ERROR'
+        });
+      }
+    }
+  };
+}
+
 // Ensure database tables exist with retry logic
 async function ensureTables(retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -250,6 +290,14 @@ app.use((req, res, next) => {
       console.error('The application will start without database connectivity');
       console.error('Database operations will fail until connection is restored');
       console.error('Database error:', dbError instanceof Error ? dbError.message : dbError);
+      
+      // Set up periodic reconnection attempts
+      setInterval(async () => {
+        if (!dbConnected) {
+          console.log('🔄 Attempting periodic database reconnection...');
+          dbConnected = await attemptDatabaseReconnection();
+        }
+      }, 30000); // Try reconnecting every 30 seconds
     }
 
   // Health check endpoint
@@ -351,7 +399,7 @@ app.use((req, res, next) => {
 
   // === METRICS: /api/metrics/overview ===
   // Devuelve 0 si no hay datos; el FE renombra la tarjeta a "Accepted Invitations"
-  app.get('/api/metrics/overview', async (_req, res) => {
+  app.get('/api/metrics/overview', withDatabaseErrorHandling(async (_req: Request, res: Response) => {
     if (process.env.DEBUG_DIAGNOSTICS) {
       console.log("[DIAGNOSTICO BFF] Solicitando /api/metrics/overview");
     }
@@ -424,9 +472,9 @@ app.use((req, res, next) => {
       res.json(rows[0]);
     } catch (error: any) {
       console.error("[DIAGNOSTICO BFF] ERROR en PostgreSQL:", error.message, error.stack);
-      res.status(500).json({ error: 'Internal Server Error' });
+      throw error; // Let the withDatabaseErrorHandling middleware handle it
     }
-  });
+  }));
 
   // === QUEUE STATUS: /api/queue/status ===
   app.get('/api/queue/status', async (_req, res) => {
