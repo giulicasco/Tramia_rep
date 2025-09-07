@@ -7,7 +7,18 @@ import rateLimit from "express-rate-limit";
 import pg from "pg";
 const { Pool } = pg;
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite-fallback";
+import path from "path";
+import fs from "fs";
+
+function log(message: string, source = "express") {
+  const formattedTime = new Date().toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+  console.log(`${formattedTime} [${source}] ${message}`);
+}
 
 // Environment variable validation
 function validateEnvironment() {
@@ -466,13 +477,28 @@ app.use((req, res, next) => {
   // Let the SPA handle authentication state client-side
   // Only protect API routes server-side (already done above)
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
+  // Serve static files from dist/public
+  const distPath = path.resolve(import.meta.dirname, "..", "dist", "public");
+  
+  if (fs.existsSync(distPath)) {
+    log("📁 Serving static files from dist/public", "express");
+    app.use(express.static(distPath));
+    app.use("*", (_req, res) => {
+      res.sendFile(path.resolve(distPath, "index.html"));
+    });
   } else {
-    serveStatic(app);
+    log("❌ No build directory found, serving minimal response", "express");
+    app.use("*", (_req, res) => {
+      res.status(503).send(`
+        <html>
+          <body>
+            <h1>Tramia Dashboard</h1>
+            <p>Application is running but frontend build not found.</p>
+            <p>Please build the frontend first.</p>
+          </body>
+        </html>
+      `);
+    });
   }
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
