@@ -69,32 +69,59 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 
-// Database connection with enhanced error handling
+// Database connection with enhanced error handling and retry logic
 let pool: pg.Pool;
 
-async function initializeDatabase() {
-  try {
-    console.log('🔄 Initializing database connection...');
-    pool = new Pool({ 
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-    });
+async function initializeDatabase(retries = 5, initialDelay = 1000) {
+  let lastError: any;
+  
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`🔄 Initializing database connection... (attempt ${attempt}/${retries})`);
+      
+      // Create new pool instance for each attempt
+      if (pool) {
+        await pool.end().catch(() => {}); // Cleanup previous pool if exists
+      }
+      
+      pool = new Pool({ 
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+        max: 20,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+      });
 
-    // Test database connection
-    const client = await pool.connect();
-    await client.query('SELECT NOW()');
-    client.release();
-    console.log('✅ Database connection established');
-    
-    return pool;
-  } catch (error) {
-    console.error('❌ Database connection failed:', error);
-    console.error('Please verify DATABASE_URL is properly formatted for PostgreSQL connection');
-    throw error;
+      // Test database connection with timeout
+      const client = await pool.connect();
+      await client.query('SELECT NOW()');
+      client.release();
+      console.log('✅ Database connection established');
+      
+      return pool;
+    } catch (error: any) {
+      lastError = error;
+      console.error(`❌ Database connection failed (attempt ${attempt}/${retries}):`, error.message);
+      
+      if (attempt === retries) {
+        console.error('💥 Database connection failed after all retries');
+        console.error('This may be due to:');
+        console.error('- Incorrect DATABASE_URL credentials (check username/password)');
+        console.error('- Database server not accessible');
+        console.error('- Network connectivity issues');
+        console.error('- Database not provisioned or properly configured');
+        console.error('Please verify DATABASE_URL is properly formatted for PostgreSQL connection');
+        break;
+      }
+      
+      // Exponential backoff with jitter
+      const delay = initialDelay * Math.pow(2, attempt - 1) + Math.random() * 1000;
+      console.log(`⏳ Retrying database connection in ${Math.round(delay)}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
   }
+  
+  throw lastError;
 }
 
 // Ensure database tables exist with retry logic
