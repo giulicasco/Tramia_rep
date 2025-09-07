@@ -10,8 +10,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const data = await callN8N(`/webhook/tramia-auth-me`, undefined, { method: "GET" });
       res.json(data);
     } catch (e: any) {
-      // Temporary fallback while n8n webhook is being set up
-      if (e.message?.includes("404")) {
+      // Fallback when n8n is disabled or webhook is not set up
+      if (e.message?.includes("404") || e.message?.includes("n8n_disabled")) {
         res.json({
           isAuthenticated: true,
           user: { 
