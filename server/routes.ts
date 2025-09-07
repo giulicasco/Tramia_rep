@@ -2,23 +2,29 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { callN8N } from "./n8n";
+import { pool } from "./db";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth & User routes
   app.get("/api/me", async (req, res) => {
     try {
-      const data = await callN8N(`/webhook/tramia-auth-me`, undefined, { method: "GET" });
-      res.json(data);
-    } catch (e: any) {
-      // Fallback when n8n is disabled or webhook is not set up
-      if (e.message?.includes("404") || e.message?.includes("n8n_disabled")) {
+      // Query real user data from database
+      const userQuery = await pool.query(`
+        SELECT id, email, role, created_at 
+        FROM admin_users 
+        WHERE is_active = true 
+        LIMIT 1
+      `);
+      
+      if (userQuery.rows.length > 0) {
+        const user = userQuery.rows[0];
         res.json({
           isAuthenticated: true,
           user: { 
-            id: "admin", 
-            name: "Admin", 
-            email: "partners@letsaitomate.com", 
-            roles: ["admin"] 
+            id: user.id.toString(), 
+            name: user.email.split('@')[0], // Use email prefix as name
+            email: user.email, 
+            roles: [user.role] 
           },
           organization: { 
             id: "tramia", 
@@ -27,8 +33,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         });
       } else {
-        res.status(500).json({ message: e.message || "Failed to fetch user" });
+        res.status(401).json({ message: "No active user found" });
       }
+    } catch (e: any) {
+      res.status(500).json({ message: e.message || "Failed to fetch user" });
     }
   });
 
